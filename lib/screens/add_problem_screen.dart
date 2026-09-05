@@ -1,12 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import '../models/problem.dart';
+import '../database/database_helper.dart';
 
 /// The Add Problem screen — a form for logging a new problem under the
 /// current category (Codeforces, LeetCode, AtCoder, etc.).
 ///
-/// There is no database yet, so "Save Problem" only validates the form,
-/// captures an in-memory timestamp, shows a temporary success message,
-/// and returns to the Category Problems screen. Nothing is persisted.
+/// When "Save Problem" is clicked, the problem and its approaches are
+/// saved to the local SQLite database in a transaction.
 class AddProblemScreen extends StatefulWidget {
   final String categoryIcon;
   final String categoryName;
@@ -85,33 +86,73 @@ class _AddProblemScreenState extends State<AddProblemScreen> {
       return;
     }
 
-    // Automatically capture the moment of creation in memory. This will be
-    // written to the database once storage is implemented — for now it's
-    // just captured so the wiring is ready.
-    final DateTime createdAt = DateTime.now();
-    debugPrint(
-      'Problem "${_nameController.text}" prepared at $createdAt '
-      '(category: ${widget.categoryName}) — not persisted yet.',
-    );
-
     setState(() => _isSubmitting = true);
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content:
-            const Text('Problem added successfully (storage coming next).'),
-        duration: const Duration(seconds: 2),
-        backgroundColor: Colors.white.withOpacity(0.9),
-        behavior: SnackBarBehavior.floating,
-        margin: const EdgeInsets.all(16),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-      ),
-    );
+    try {
+      // Gather approach texts (skip empty ones)
+      final approachTexts = _approachControllers
+          .map((controller) => controller.text.trim())
+          .where((text) => text.isNotEmpty)
+          .toList();
 
-    // Brief pause so the success message is visible before navigating back.
-    await Future.delayed(const Duration(milliseconds: 500));
-    if (!mounted) return;
-    Navigator.of(context).pop();
+      // Create the Problem object
+      final problem = Problem(
+        category: widget.categoryName,
+        problemName: _nameController.text.trim(),
+        problemId: _idController.text.trim(),
+        rating: _ratingController.text.trim(),
+        problemLink: _linkController.text.trim(),
+        code: _codeController.text.trim(),
+        questionUnderstanding: _understandingController.text.trim(),
+        problemsFaced: _problemsFacedController.text.trim(),
+        anyNewThingLearnt: _learntController.text.trim(),
+      );
+
+      // Save to database (problem + approaches in a transaction)
+      await DatabaseHelper.instance.insertProblemWithApproaches(
+        problem,
+        approachTexts,
+      );
+
+      if (!mounted) return;
+
+      // Show success message
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Text('Problem added successfully!'),
+          duration: const Duration(seconds: 2),
+          backgroundColor: Colors.green.withOpacity(0.9),
+          behavior: SnackBarBehavior.floating,
+          margin: const EdgeInsets.all(16),
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+        ),
+      );
+
+      // Brief pause so the success message is visible before navigating back.
+      await Future.delayed(const Duration(milliseconds: 500));
+      if (!mounted) return;
+
+      // Return to category screen (which will reload the problem list)
+      Navigator.of(context).pop(true); // Pass true to indicate success
+    } catch (e) {
+      // Handle database error
+      if (!mounted) return;
+      
+      setState(() => _isSubmitting = false);
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Failed to save problem: ${e.toString()}'),
+          duration: const Duration(seconds: 3),
+          backgroundColor: Colors.redAccent.withOpacity(0.9),
+          behavior: SnackBarBehavior.floating,
+          margin: const EdgeInsets.all(16),
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+        ),
+      );
+    }
   }
 
   void _handleCancel() {

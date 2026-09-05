@@ -1,6 +1,6 @@
 import 'package:path/path.dart';
 import 'package:sqflite/sqflite.dart';
-import 'package:sqflite_common_ffi/sqflite_common_ffi.dart';
+import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 import '../models/problem.dart';
 
@@ -73,6 +73,41 @@ class DatabaseHelper {
     ''');
   }
 
+  /// Saves a new problem with its approaches in a transaction.
+  ///
+  /// `createdAt` is set automatically to the current date/time — you
+  /// never need to pass it in yourself.
+  /// 
+  /// Returns the generated problem ID on success.
+  /// If anything fails, the entire transaction is rolled back.
+  Future<int> insertProblemWithApproaches(
+    Problem problem,
+    List<String> approachTexts,
+  ) async {
+    final db = await database;
+
+    return await db.transaction((txn) async {
+      // Insert problem
+      final problemMap = problem.toMap();
+      problemMap.remove('id'); // let SQLite auto-generate this
+      problemMap['createdAt'] = DateTime.now().toIso8601String();
+
+      final problemId = await txn.insert('problems', problemMap);
+
+      // Insert approaches
+      for (final text in approachTexts) {
+        if (text.trim().isNotEmpty) {
+          await txn.insert('approaches', {
+            'problemId': problemId,
+            'approachText': text,
+          });
+        }
+      }
+
+      return problemId;
+    });
+  }
+
   /// Saves a new problem and returns its generated id.
   ///
   /// `createdAt` is set automatically to the current date/time — you
@@ -95,10 +130,12 @@ class DatabaseHelper {
     final db = await database;
 
     for (final text in approachTexts) {
-      await db.insert('approaches', {
-        'problemId': problemId,
-        'approachText': text,
-      });
+      if (text.trim().isNotEmpty) {
+        await db.insert('approaches', {
+          'problemId': problemId,
+          'approachText': text,
+        });
+      }
     }
   }
 
@@ -116,5 +153,64 @@ class DatabaseHelper {
     );
 
     return rows.map((row) => Problem.fromMap(row)).toList();
+  }
+
+  /// Returns a single problem with all its approaches.
+  Future<Map<String, dynamic>?> getProblemWithApproaches(int problemId) async {
+    final db = await database;
+
+    final problemRows = await db.query(
+      'problems',
+      where: 'id = ?',
+      whereArgs: [problemId],
+    );
+
+    if (problemRows.isEmpty) return null;
+
+    final problem = Problem.fromMap(problemRows.first);
+
+    final approachRows = await db.query(
+      'approaches',
+      where: 'problemId = ?',
+      whereArgs: [problemId],
+    );
+
+    final approaches =
+        approachRows.map((row) => Approach.fromMap(row)).toList();
+
+    return {
+      'problem': problem,
+      'approaches': approaches,
+    };
+  }
+
+  /// Deletes a problem and all its approaches.
+  Future<void> deleteProblem(int problemId) async {
+    final db = await database;
+
+    await db.transaction((txn) async {
+      await txn.delete(
+        'approaches',
+        where: 'problemId = ?',
+        whereArgs: [problemId],
+      );
+      await txn.delete(
+        'problems',
+        where: 'id = ?',
+        whereArgs: [problemId],
+      );
+    });
+  }
+
+  /// Returns the count of problems in a category.
+  Future<int> getProblemCountByCategory(String category) async {
+    final db = await database;
+
+    final result = await db.rawQuery(
+      'SELECT COUNT(*) as count FROM problems WHERE category = ?',
+      [category],
+    );
+
+    return Sqflite.firstIntValue(result) ?? 0;
   }
 }

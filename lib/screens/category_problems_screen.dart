@@ -1,12 +1,13 @@
 import 'package:flutter/material.dart';
 import 'add_problem_screen.dart';
+import '../models/problem.dart';
+import '../database/database_helper.dart';
 
 /// Screen shown after selecting a category (Codeforces, LeetCode, AtCoder,
 /// or any custom category) from the platform selection screen.
 ///
-/// Storage/database is not implemented yet, so this screen only shows
-/// static stats and an empty state. Filter tabs and search bar are present
-/// for layout purposes but are not functionally wired up yet.
+/// Loads and displays problems from the local SQLite database for the
+/// selected category. Categories are kept completely separate.
 class CategoryProblemsScreen extends StatefulWidget {
   final String categoryIcon;
   final String categoryName;
@@ -28,14 +29,53 @@ class _CategoryProblemsScreenState extends State<CategoryProblemsScreen> {
   static const List<String> _filters = ['All', 'Solved', 'Hint', 'Editorial'];
   String _selectedFilter = 'All';
 
+  List<Problem> _problems = [];
+  bool _isLoading = true;
+  int _problemCount = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadProblems();
+  }
+
   @override
   void dispose() {
     _searchController.dispose();
     super.dispose();
   }
 
-  void _openAddProblem() {
-    Navigator.of(context).push(
+  Future<void> _loadProblems() async {
+    setState(() => _isLoading = true);
+
+    try {
+      final problems = await DatabaseHelper.instance
+          .getProblemsByCategory(widget.categoryName);
+      final count = await DatabaseHelper.instance
+          .getProblemCountByCategory(widget.categoryName);
+
+      if (mounted) {
+        setState(() {
+          _problems = problems;
+          _problemCount = count;
+          _isLoading = false;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() => _isLoading = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to load problems: ${e.toString()}'),
+            backgroundColor: Colors.redAccent.withOpacity(0.9),
+          ),
+        );
+      }
+    }
+  }
+
+  void _openAddProblem() async {
+    final result = await Navigator.of(context).push(
       MaterialPageRoute(
         builder: (context) => AddProblemScreen(
           categoryIcon: widget.categoryIcon,
@@ -43,6 +83,11 @@ class _CategoryProblemsScreenState extends State<CategoryProblemsScreen> {
         ),
       ),
     );
+
+    // If a problem was added, reload the list
+    if (result == true) {
+      _loadProblems();
+    }
   }
 
   @override
@@ -66,7 +111,11 @@ class _CategoryProblemsScreenState extends State<CategoryProblemsScreen> {
                   const SizedBox(height: 20),
                   _buildFilterTabs(),
                   const SizedBox(height: 40),
-                  _buildEmptyState(),
+                  _isLoading
+                      ? _buildLoadingState()
+                      : _problems.isEmpty
+                          ? _buildEmptyState()
+                          : _buildProblemsList(),
                 ],
               ),
             ),
@@ -130,7 +179,7 @@ class _CategoryProblemsScreenState extends State<CategoryProblemsScreen> {
         Expanded(
           child: _StatCard(
             label: 'Total Problems',
-            value: '0 Problems',
+            value: '$_problemCount ${_problemCount == 1 ? 'Problem' : 'Problems'}',
           ),
         ),
         const SizedBox(width: 16),
@@ -262,6 +311,36 @@ class _CategoryProblemsScreenState extends State<CategoryProblemsScreen> {
       ),
     );
   }
+
+  // 6. Loading state
+  Widget _buildLoadingState() {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(vertical: 64, horizontal: 24),
+      decoration: BoxDecoration(
+        color: const Color(0xFF1A1A1A),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.white.withOpacity(0.1)),
+      ),
+      child: Center(
+        child: CircularProgressIndicator(
+          color: Colors.white.withOpacity(0.7),
+        ),
+      ),
+    );
+  }
+
+  // 7. Problems list
+  Widget _buildProblemsList() {
+    return Column(
+      children: _problems.map((problem) {
+        return Padding(
+          padding: const EdgeInsets.only(bottom: 12),
+          child: _ProblemCard(problem: problem),
+        );
+      }).toList(),
+    );
+  }
 }
 
 class _StatCard extends StatelessWidget {
@@ -306,5 +385,126 @@ class _StatCard extends StatelessWidget {
         ],
       ),
     );
+  }
+}
+
+class _ProblemCard extends StatelessWidget {
+  final Problem problem;
+
+  const _ProblemCard({
+    Key? key,
+    required this.problem,
+  }) : super(key: key);
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: const Color(0xFF1A1A1A),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.white.withOpacity(0.1)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  problem.problemName,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 16,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+              if (problem.rating.isNotEmpty)
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withOpacity(0.08),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: Colors.white.withOpacity(0.1)),
+                  ),
+                  child: Text(
+                    problem.rating,
+                    style: TextStyle(
+                      color: Colors.white.withOpacity(0.7),
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              Text(
+                'ID: ${problem.problemId}',
+                style: TextStyle(
+                  color: Colors.white.withOpacity(0.5),
+                  fontSize: 13,
+                ),
+              ),
+              if (problem.createdAt != null) ...[
+                const SizedBox(width: 12),
+                Text(
+                  '•',
+                  style: TextStyle(
+                    color: Colors.white.withOpacity(0.3),
+                    fontSize: 13,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Text(
+                  _formatDate(problem.createdAt!),
+                  style: TextStyle(
+                    color: Colors.white.withOpacity(0.5),
+                    fontSize: 13,
+                  ),
+                ),
+              ],
+            ],
+          ),
+          if (problem.questionUnderstanding.isNotEmpty) ...[
+            const SizedBox(height: 12),
+            Text(
+              problem.questionUnderstanding,
+              style: TextStyle(
+                color: Colors.white.withOpacity(0.7),
+                fontSize: 14,
+                height: 1.4,
+              ),
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  String _formatDate(String isoDate) {
+    try {
+      final date = DateTime.parse(isoDate);
+      final now = DateTime.now();
+      final difference = now.difference(date);
+
+      if (difference.inDays == 0) {
+        return 'Today';
+      } else if (difference.inDays == 1) {
+        return 'Yesterday';
+      } else if (difference.inDays < 7) {
+        return '${difference.inDays} days ago';
+      } else {
+        return '${date.day}/${date.month}/${date.year}';
+      }
+    } catch (e) {
+      return '';
+    }
   }
 }

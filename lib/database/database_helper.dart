@@ -1,0 +1,120 @@
+import 'package:path/path.dart';
+import 'package:sqflite/sqflite.dart';
+import 'package:sqflite_common_ffi/sqflite_common_ffi.dart';
+
+import '../models/problem.dart';
+
+/// Handles all local SQLite database access for SolveLog.
+///
+/// This is a simple singleton: call `DatabaseHelper.instance` anywhere
+/// you need the database, and it takes care of creating/opening it the
+/// first time it's used.
+///
+/// Two tables are created:
+/// - `problems`   — one row per saved problem (holds its category, so
+///                  Codeforces/LeetCode/AtCoder/etc. problems stay separate)
+/// - `approaches` — one row per approach, linked to a problem by `problemId`
+///                  (a problem can have many approaches)
+class DatabaseHelper {
+  DatabaseHelper._internal();
+
+  static final DatabaseHelper instance = DatabaseHelper._internal();
+
+  static Database? _database;
+
+  /// The open database. Opens/creates it on first access.
+  Future<Database> get database async {
+    if (_database != null) return _database!;
+    _database = await _initDatabase();
+    return _database!;
+  }
+
+  Future<Database> _initDatabase() async {
+    // sqflite doesn't talk to native SQLite on desktop by itself.
+    // sqflite_common_ffi provides that desktop (macOS/Windows/Linux)
+    // implementation, so we point sqflite at it before opening anything.
+    sqfliteFfiInit();
+    databaseFactory = databaseFactoryFfi;
+
+    final databasesPath = await getDatabasesPath();
+    final path = join(databasesPath, 'solvelog.db');
+
+    return openDatabase(
+      path,
+      version: 1,
+      onCreate: _onCreate,
+    );
+  }
+
+  Future<void> _onCreate(Database db, int version) async {
+    await db.execute('''
+      CREATE TABLE problems (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        category TEXT NOT NULL,
+        problemName TEXT NOT NULL,
+        problemId TEXT NOT NULL,
+        rating TEXT,
+        problemLink TEXT,
+        code TEXT,
+        questionUnderstanding TEXT,
+        problemsFaced TEXT,
+        anyNewThingLearnt TEXT,
+        createdAt TEXT NOT NULL
+      )
+    ''');
+
+    await db.execute('''
+      CREATE TABLE approaches (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        problemId INTEGER NOT NULL,
+        approachText TEXT,
+        FOREIGN KEY (problemId) REFERENCES problems (id)
+      )
+    ''');
+  }
+
+  /// Saves a new problem and returns its generated id.
+  ///
+  /// `createdAt` is set automatically to the current date/time — you
+  /// never need to pass it in yourself.
+  Future<int> insertProblem(Problem problem) async {
+    final db = await database;
+
+    final problemMap = problem.toMap();
+    problemMap.remove('id'); // let SQLite auto-generate this
+    problemMap['createdAt'] = DateTime.now().toIso8601String();
+
+    return db.insert('problems', problemMap);
+  }
+
+  /// Saves a list of approach texts, all linked to the given problem.
+  Future<void> insertApproaches(
+    int problemId,
+    List<String> approachTexts,
+  ) async {
+    final db = await database;
+
+    for (final text in approachTexts) {
+      await db.insert('approaches', {
+        'problemId': problemId,
+        'approachText': text,
+      });
+    }
+  }
+
+  /// Returns every problem saved under [category] (e.g. "Codeforces"),
+  /// newest first. Categories are kept completely separate — a problem
+  /// only ever shows up for the category it was saved under.
+  Future<List<Problem>> getProblemsByCategory(String category) async {
+    final db = await database;
+
+    final rows = await db.query(
+      'problems',
+      where: 'category = ?',
+      whereArgs: [category],
+      orderBy: 'createdAt DESC',
+    );
+
+    return rows.map((row) => Problem.fromMap(row)).toList();
+  }
+}

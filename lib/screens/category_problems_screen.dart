@@ -27,12 +27,24 @@ class CategoryProblemsScreen extends StatefulWidget {
 class _CategoryProblemsScreenState extends State<CategoryProblemsScreen> {
   final TextEditingController _searchController = TextEditingController();
 
-  static const List<String> _filters = ['All', 'Solved', 'Hint', 'Editorial'];
-  String _selectedFilter = 'All';
-
   List<Problem> _problems = [];
+  List<Problem> _filteredProblems = [];
   bool _isLoading = true;
   int _problemCount = 0;
+
+  // Sort options
+  String _sortBy = 'Date: Latest First'; // Default sort
+  final List<String> _sortOptions = [
+    'Date: Latest First',
+    'Date: Oldest First',
+    'Rating: Low to High',
+    'Rating: High to Low',
+  ];
+
+  // Filter options
+  DateTimeRange? _dateRange;
+  String? _ratingMin;
+  String? _ratingMax;
 
   @override
   void initState() {
@@ -61,6 +73,7 @@ class _CategoryProblemsScreenState extends State<CategoryProblemsScreen> {
           _problemCount = count;
           _isLoading = false;
         });
+        _applyFiltersAndSort();
       }
     } catch (e) {
       if (mounted) {
@@ -73,6 +86,85 @@ class _CategoryProblemsScreenState extends State<CategoryProblemsScreen> {
         );
       }
     }
+  }
+
+  void _applyFiltersAndSort() {
+    List<Problem> filtered = List.from(_problems);
+
+    // Apply date filter
+    if (_dateRange != null) {
+      filtered = filtered.where((problem) {
+        if (problem.createdAt == null) return false;
+        try {
+          final problemDate = DateTime.parse(problem.createdAt!);
+          final startDate = DateTime(_dateRange!.start.year, _dateRange!.start.month, _dateRange!.start.day);
+          final endDate = DateTime(_dateRange!.end.year, _dateRange!.end.month, _dateRange!.end.day, 23, 59, 59);
+          return problemDate.isAfter(startDate.subtract(const Duration(seconds: 1))) && 
+                 problemDate.isBefore(endDate.add(const Duration(seconds: 1)));
+        } catch (e) {
+          return false;
+        }
+      }).toList();
+    }
+
+    // Apply rating filter
+    if (_ratingMin != null || _ratingMax != null) {
+      filtered = filtered.where((problem) {
+        if (problem.rating.isEmpty) return false;
+        try {
+          final rating = int.tryParse(problem.rating);
+          if (rating == null) return false;
+          
+          if (_ratingMin != null && _ratingMax != null) {
+            final min = int.tryParse(_ratingMin!);
+            final max = int.tryParse(_ratingMax!);
+            if (min != null && max != null) {
+              return rating >= min && rating <= max;
+            }
+          } else if (_ratingMin != null) {
+            final min = int.tryParse(_ratingMin!);
+            if (min != null) return rating >= min;
+          } else if (_ratingMax != null) {
+            final max = int.tryParse(_ratingMax!);
+            if (max != null) return rating <= max;
+          }
+          return true;
+        } catch (e) {
+          return false;
+        }
+      }).toList();
+    }
+
+    // Apply sorting
+    if (_sortBy == 'Date: Latest First') {
+      filtered.sort((a, b) {
+        if (a.createdAt == null) return 1;
+        if (b.createdAt == null) return -1;
+        return DateTime.parse(b.createdAt!).compareTo(DateTime.parse(a.createdAt!));
+      });
+    } else if (_sortBy == 'Date: Oldest First') {
+      filtered.sort((a, b) {
+        if (a.createdAt == null) return 1;
+        if (b.createdAt == null) return -1;
+        return DateTime.parse(a.createdAt!).compareTo(DateTime.parse(b.createdAt!));
+      });
+    } else if (_sortBy == 'Rating: Low to High') {
+      filtered.sort((a, b) {
+        final aRating = int.tryParse(a.rating) ?? 0;
+        final bRating = int.tryParse(b.rating) ?? 0;
+        return aRating.compareTo(bRating);
+      });
+    } else if (_sortBy == 'Rating: High to Low') {
+      filtered.sort((a, b) {
+        final aRating = int.tryParse(a.rating) ?? 0;
+        final bRating = int.tryParse(b.rating) ?? 0;
+        return bRating.compareTo(aRating);
+      });
+    }
+
+    setState(() {
+      _filteredProblems = filtered;
+    });
   }
 
   void _openAddProblem() async {
@@ -110,11 +202,11 @@ class _CategoryProblemsScreenState extends State<CategoryProblemsScreen> {
                   const SizedBox(height: 28),
                   _buildSearchBar(),
                   const SizedBox(height: 20),
-                  _buildFilterTabs(),
+                  _buildSortAndFilterBar(),
                   const SizedBox(height: 40),
                   _isLoading
                       ? _buildLoadingState()
-                      : _problems.isEmpty
+                      : _filteredProblems.isEmpty
                           ? _buildEmptyState()
                           : _buildProblemsList(),
                 ],
@@ -218,43 +310,398 @@ class _CategoryProblemsScreenState extends State<CategoryProblemsScreen> {
     );
   }
 
-  // 4. Filter tabs
-  Widget _buildFilterTabs() {
+  // 4. Sort and Filter bar
+  Widget _buildSortAndFilterBar() {
     return Row(
-      children: _filters.map((filter) {
-        final bool isSelected = filter == _selectedFilter;
-        return Padding(
-          padding: const EdgeInsets.only(right: 10),
-          child: GestureDetector(
-            onTap: () => setState(() => _selectedFilter = filter),
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 150),
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
-              decoration: BoxDecoration(
-                color: isSelected
-                    ? Colors.white.withOpacity(0.12)
-                    : const Color(0xFF1A1A1A),
-                borderRadius: BorderRadius.circular(20),
-                border: Border.all(
-                  color: isSelected
-                      ? Colors.white.withOpacity(0.3)
-                      : Colors.white.withOpacity(0.1),
+      children: [
+        // Sort button
+        Expanded(
+          child: _buildSortButton(),
+        ),
+        const SizedBox(width: 12),
+        // Filter button
+        Expanded(
+          child: _buildFilterButton(),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildSortButton() {
+    return GestureDetector(
+      onTap: _showSortOptions,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+        decoration: BoxDecoration(
+          color: const Color(0xFF1A1A1A),
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: Colors.white.withOpacity(0.1)),
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Row(
+              children: [
+                Icon(Icons.sort, color: Colors.white.withOpacity(0.7), size: 18),
+                const SizedBox(width: 8),
+                Text(
+                  _sortBy,
+                  style: TextStyle(
+                    color: Colors.white.withOpacity(0.9),
+                    fontSize: 13,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ],
+            ),
+            Icon(Icons.arrow_drop_down, color: Colors.white.withOpacity(0.5), size: 20),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildFilterButton() {
+    final bool hasFilters = _dateRange != null || _ratingMin != null || _ratingMax != null;
+    
+    return GestureDetector(
+      onTap: _showFilterOptions,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+        decoration: BoxDecoration(
+          color: hasFilters ? Colors.white.withOpacity(0.12) : const Color(0xFF1A1A1A),
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(
+            color: hasFilters ? Colors.white.withOpacity(0.3) : Colors.white.withOpacity(0.1),
+          ),
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Row(
+              children: [
+                Icon(
+                  Icons.filter_list,
+                  color: hasFilters ? Colors.white : Colors.white.withOpacity(0.7),
+                  size: 18,
+                ),
+                const SizedBox(width: 8),
+                Text(
+                  hasFilters ? 'Filtered' : 'Filter',
+                  style: TextStyle(
+                    color: hasFilters ? Colors.white : Colors.white.withOpacity(0.9),
+                    fontSize: 13,
+                    fontWeight: hasFilters ? FontWeight.w600 : FontWeight.w500,
+                  ),
+                ),
+              ],
+            ),
+            if (hasFilters)
+              GestureDetector(
+                onTap: () {
+                  setState(() {
+                    _dateRange = null;
+                    _ratingMin = null;
+                    _ratingMax = null;
+                  });
+                  _applyFiltersAndSort();
+                },
+                child: Icon(Icons.close, color: Colors.white.withOpacity(0.7), size: 18),
+              )
+            else
+              Icon(Icons.arrow_drop_down, color: Colors.white.withOpacity(0.5), size: 20),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showSortOptions() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: const Color(0xFF1A1A1A),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+                child: Row(
+                  children: [
+                    const Text(
+                      'Sort By',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 18,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
                 ),
               ),
-              child: Text(
-                filter,
-                style: TextStyle(
-                  color: isSelected ? Colors.white : Colors.white60,
-                  fontSize: 13,
-                  fontWeight: isSelected ? FontWeight.w600 : FontWeight.w400,
+              const Divider(color: Colors.white12),
+              ..._sortOptions.map((option) => ListTile(
+                leading: Radio<String>(
+                  value: option,
+                  groupValue: _sortBy,
+                  onChanged: (value) {
+                    setState(() => _sortBy = value!);
+                    _applyFiltersAndSort();
+                    Navigator.pop(context);
+                  },
+                  activeColor: Colors.white,
                 ),
+                title: Text(
+                  option,
+                  style: TextStyle(
+                    color: _sortBy == option ? Colors.white : Colors.white70,
+                    fontWeight: _sortBy == option ? FontWeight.w600 : FontWeight.w400,
+                  ),
+                ),
+                onTap: () {
+                  setState(() => _sortBy = option);
+                  _applyFiltersAndSort();
+                  Navigator.pop(context);
+                },
+              )),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _showFilterOptions() {
+    final dateMinController = TextEditingController();
+    final dateMaxController = TextEditingController();
+    final ratingMinController = TextEditingController(text: _ratingMin ?? '');
+    final ratingMaxController = TextEditingController(text: _ratingMax ?? '');
+
+    DateTimeRange? tempDateRange = _dateRange;
+
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: const Color(0xFF1A1A1A),
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) => StatefulBuilder(
+        builder: (context, setModalState) => SafeArea(
+          child: Padding(
+            padding: EdgeInsets.only(
+              left: 20,
+              right: 20,
+              top: 20,
+              bottom: MediaQuery.of(context).viewInsets.bottom + 20,
+            ),
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Text(
+                        'Filter Problems',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 18,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      TextButton(
+                        onPressed: () {
+                          setState(() {
+                            _dateRange = tempDateRange;
+                            _ratingMin = ratingMinController.text.isEmpty ? null : ratingMinController.text;
+                            _ratingMax = ratingMaxController.text.isEmpty ? null : ratingMaxController.text;
+                          });
+                          _applyFiltersAndSort();
+                          Navigator.pop(context);
+                        },
+                        child: const Text(
+                          'Apply',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const Divider(color: Colors.white12),
+                  const SizedBox(height: 16),
+                  
+                  // Date Range Filter
+                  Text(
+                    'Date Range',
+                    style: TextStyle(
+                      color: Colors.white.withOpacity(0.9),
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  GestureDetector(
+                    onTap: () async {
+                      final picked = await showDateRangePicker(
+                        context: context,
+                        firstDate: DateTime(2020),
+                        lastDate: DateTime.now(),
+                        initialDateRange: tempDateRange,
+                        builder: (context, child) {
+                          return Theme(
+                            data: ThemeData.dark(),
+                            child: child!,
+                          );
+                        },
+                      );
+                      if (picked != null) {
+                        setModalState(() {
+                          tempDateRange = picked;
+                        });
+                      }
+                    },
+                    child: Container(
+                      padding: const EdgeInsets.all(14),
+                      decoration: BoxDecoration(
+                        color: Colors.white.withOpacity(0.05),
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: Colors.white.withOpacity(0.1)),
+                      ),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Text(
+                            tempDateRange == null
+                                ? 'Select date range'
+                                : '${_formatDateShort(tempDateRange!.start)} - ${_formatDateShort(tempDateRange!.end)}',
+                            style: TextStyle(
+                              color: tempDateRange == null 
+                                  ? Colors.white.withOpacity(0.5)
+                                  : Colors.white,
+                              fontSize: 13,
+                            ),
+                          ),
+                          Icon(
+                            Icons.calendar_today,
+                            size: 16,
+                            color: Colors.white.withOpacity(0.5),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  if (tempDateRange != null)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 8),
+                      child: TextButton.icon(
+                        onPressed: () {
+                          setModalState(() {
+                            tempDateRange = null;
+                          });
+                        },
+                        icon: const Icon(Icons.clear, size: 16, color: Colors.redAccent),
+                        label: const Text(
+                          'Clear date range',
+                          style: TextStyle(color: Colors.redAccent, fontSize: 12),
+                        ),
+                      ),
+                    ),
+                  
+                  const SizedBox(height: 24),
+                  
+                  // Rating Range Filter
+                  Text(
+                    'Rating Range',
+                    style: TextStyle(
+                      color: Colors.white.withOpacity(0.9),
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: TextField(
+                          controller: ratingMinController,
+                          style: const TextStyle(color: Colors.white),
+                          keyboardType: TextInputType.number,
+                          decoration: InputDecoration(
+                            hintText: 'Min',
+                            hintStyle: TextStyle(color: Colors.white.withOpacity(0.3)),
+                            filled: true,
+                            fillColor: Colors.white.withOpacity(0.05),
+                            contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+                            border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(8),
+                              borderSide: BorderSide(color: Colors.white.withOpacity(0.1)),
+                            ),
+                            enabledBorder: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(8),
+                              borderSide: BorderSide(color: Colors.white.withOpacity(0.1)),
+                            ),
+                            focusedBorder: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(8),
+                              borderSide: BorderSide(color: Colors.white.withOpacity(0.3)),
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Text(
+                        'to',
+                        style: TextStyle(color: Colors.white.withOpacity(0.5)),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: TextField(
+                          controller: ratingMaxController,
+                          style: const TextStyle(color: Colors.white),
+                          keyboardType: TextInputType.number,
+                          decoration: InputDecoration(
+                            hintText: 'Max',
+                            hintStyle: TextStyle(color: Colors.white.withOpacity(0.3)),
+                            filled: true,
+                            fillColor: Colors.white.withOpacity(0.05),
+                            contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+                            border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(8),
+                              borderSide: BorderSide(color: Colors.white.withOpacity(0.1)),
+                            ),
+                            enabledBorder: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(8),
+                              borderSide: BorderSide(color: Colors.white.withOpacity(0.1)),
+                            ),
+                            focusedBorder: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(8),
+                              borderSide: BorderSide(color: Colors.white.withOpacity(0.3)),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 20),
+                ],
               ),
             ),
           ),
-        );
-      }).toList(),
+        ),
+      ),
     );
+  }
+
+  String _formatDateShort(DateTime date) {
+    return '${date.day}/${date.month}/${date.year}';
   }
 
   // 5. Empty state
@@ -334,7 +781,7 @@ class _CategoryProblemsScreenState extends State<CategoryProblemsScreen> {
   // 7. Problems list
   Widget _buildProblemsList() {
     return Column(
-      children: _problems.map((problem) {
+      children: _filteredProblems.map((problem) {
         return Padding(
           padding: const EdgeInsets.only(bottom: 12),
           child: _ProblemCard(

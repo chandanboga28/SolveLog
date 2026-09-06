@@ -87,6 +87,39 @@ class _AddProblemScreenState extends State<AddProblemScreen> {
     return null;
   }
 
+  String? _idValidator(String? value) {
+    // Problem ID is optional for Miscellaneous category
+    if (widget.categoryName == 'Miscellaneous') {
+      return null;
+    }
+    if (value == null || value.trim().isEmpty) {
+      return 'This field is required';
+    }
+    return null;
+  }
+
+  String? _ratingValidator(String? value) {
+    // Rating is optional for Miscellaneous category
+    if (widget.categoryName == 'Miscellaneous') {
+      return null;
+    }
+    if (value == null || value.trim().isEmpty) {
+      return 'This field is required';
+    }
+    return null;
+  }
+
+  String? _linkValidator(String? value) {
+    // Link is optional for Miscellaneous category
+    if (widget.categoryName == 'Miscellaneous') {
+      return null;
+    }
+    if (value == null || value.trim().isEmpty) {
+      return 'This field is required';
+    }
+    return null;
+  }
+
   Future<void> _handleSave() async {
     if (!_formKey.currentState!.validate()) {
       return;
@@ -251,20 +284,24 @@ class _AddProblemScreenState extends State<AddProblemScreen> {
                       children: [
                         Expanded(
                           child: _buildLabeledField(
-                            label: 'Problem ID',
+                            label: widget.categoryName == 'Miscellaneous'
+                                ? 'Problem ID (Optional)'
+                                : 'Problem ID',
                             child: TextFormField(
                               controller: _idController,
                               style: _fieldTextStyle,
                               decoration:
                                   _inputDecoration(hint: 'e.g. 4A, 71A'),
-                              validator: _requiredValidator,
+                              validator: _idValidator,
                             ),
                           ),
                         ),
                         const SizedBox(width: 16),
                         Expanded(
                           child: _buildLabeledField(
-                            label: 'Rating',
+                            label: widget.categoryName == 'Miscellaneous' 
+                                ? 'Rating (Optional)' 
+                                : 'Rating',
                             child: TextFormField(
                               controller: _ratingController,
                               style: _fieldTextStyle,
@@ -274,7 +311,7 @@ class _AddProblemScreenState extends State<AddProblemScreen> {
                               ],
                               decoration: _inputDecoration(
                                   hint: 'e.g. 800, 1200'),
-                              validator: _requiredValidator,
+                              validator: _ratingValidator,
                             ),
                           ),
                         ),
@@ -282,16 +319,19 @@ class _AddProblemScreenState extends State<AddProblemScreen> {
                     ),
                     const SizedBox(height: 16),
                     _buildLabeledField(
-                      label: 'Problem Link',
+                      label: widget.categoryName == 'Miscellaneous'
+                          ? 'Problem Link (Optional)'
+                          : 'Problem Link',
                       child: TextFormField(
                         controller: _linkController,
                         style: _fieldTextStyle,
                         keyboardType: TextInputType.url,
                         decoration: _inputDecoration(
-                          hint:
-                              'https://codeforces.com/problemset/problem/...',
+                          hint: widget.categoryName == 'Miscellaneous'
+                              ? 'https://... (if available)'
+                              : 'https://codeforces.com/problemset/problem/...',
                         ),
-                        validator: _requiredValidator,
+                        validator: _linkValidator,
                       ),
                     ),
 

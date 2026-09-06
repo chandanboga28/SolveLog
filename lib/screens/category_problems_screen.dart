@@ -432,13 +432,39 @@ class _ProblemCard extends StatelessWidget {
             Row(
               children: [
                 Expanded(
-                  child: Text(
-                    problem.problemName,
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 16,
-                      fontWeight: FontWeight.w600,
-                    ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        problem.problemName,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 16,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      if (problem.createdAt != null) ...[
+                        const SizedBox(height: 4),
+                        Row(
+                          children: [
+                            Icon(
+                              Icons.check_circle_outline,
+                              size: 14,
+                              color: Colors.green.withOpacity(0.7),
+                            ),
+                            const SizedBox(width: 6),
+                            Text(
+                              'Solved ${_formatDateVerbose(problem.createdAt!)}',
+                              style: TextStyle(
+                                color: Colors.green.withOpacity(0.7),
+                                fontSize: 12,
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ],
                   ),
                 ),
                 if (problem.rating.isNotEmpty)
@@ -477,24 +503,6 @@ class _ProblemCard extends StatelessWidget {
                     fontSize: 13,
                   ),
                 ),
-                if (problem.createdAt != null) ...[
-                  const SizedBox(width: 12),
-                  Text(
-                    '•',
-                    style: TextStyle(
-                      color: Colors.white.withOpacity(0.3),
-                      fontSize: 13,
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Text(
-                    _formatDate(problem.createdAt!),
-                    style: TextStyle(
-                      color: Colors.white.withOpacity(0.5),
-                      fontSize: 13,
-                    ),
-                  ),
-                ],
               ],
             ),
             if (problem.questionUnderstanding.isNotEmpty) ...[
@@ -530,6 +538,41 @@ class _ProblemCard extends StatelessWidget {
         return '${difference.inDays} days ago';
       } else {
         return '${date.day}/${date.month}/${date.year}';
+      }
+    } catch (e) {
+      return '';
+    }
+  }
+
+  String _formatDateVerbose(String isoDate) {
+    try {
+      final date = DateTime.parse(isoDate);
+      final now = DateTime.now();
+      final today = DateTime(now.year, now.month, now.day);
+      final problemDate = DateTime(date.year, date.month, date.day);
+      final difference = today.difference(problemDate).inDays;
+
+      // Format time
+      final hour = date.hour;
+      final minute = date.minute.toString().padLeft(2, '0');
+      final period = hour >= 12 ? 'PM' : 'AM';
+      final hour12 = hour > 12 ? hour - 12 : (hour == 0 ? 12 : hour);
+      final timeStr = '$hour12:$minute $period';
+
+      if (difference == 0) {
+        return 'today at $timeStr';
+      } else if (difference == 1) {
+        return 'yesterday at $timeStr';
+      } else if (difference < 7) {
+        return '${difference} days ago';
+      } else if (difference < 30) {
+        final weeks = (difference / 7).floor();
+        return '$weeks ${weeks == 1 ? 'week' : 'weeks'} ago';
+      } else if (difference < 365) {
+        final months = (difference / 30).floor();
+        return '$months ${months == 1 ? 'month' : 'months'} ago';
+      } else {
+        return 'on ${date.day}/${date.month}/${date.year}';
       }
     } catch (e) {
       return '';

@@ -2,20 +2,22 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
 
-/// Screen for editing an existing custom category.
+/// Screen for editing an existing category (default or custom).
 ///
-/// Allows users to change the icon and name of a custom category.
+/// Allows users to change the icon and name of a category.
 /// Updates are saved to SharedPreferences.
 class EditCategoryScreen extends StatefulWidget {
   final String originalIcon;
   final String originalName;
   final int categoryIndex;
+  final bool isDefault;
 
   const EditCategoryScreen({
     Key? key,
     required this.originalIcon,
     required this.originalName,
     required this.categoryIndex,
+    this.isDefault = false,
   }) : super(key: key);
 
   @override
@@ -70,24 +72,48 @@ class _EditCategoryScreenState extends State<EditCategoryScreen> {
     try {
       final prefs = await SharedPreferences.getInstance();
       
-      // Get existing custom categories
-      final categoriesJson = prefs.getString('custom_categories') ?? '[]';
+      // Determine which category list to work with
+      final storageKey = widget.isDefault ? 'default_categories' : 'custom_categories';
+      
+      // Get existing categories
+      final categoriesJson = prefs.getString(storageKey) ?? '[]';
       final List<dynamic> categories = json.decode(categoriesJson);
       
       // Check for duplicate name (excluding current category)
       final categoryName = _nameController.text.trim();
+      
+      // Check against categories in the same list (excluding current)
       final isDuplicate = categories.asMap().entries.any(
         (entry) => entry.key != widget.categoryIndex &&
                    entry.value['name'].toString().toLowerCase() == categoryName.toLowerCase()
       );
       
-      // Also check against default categories
-      final defaultCategories = ['Codeforces', 'LeetCode', 'AtCoder'];
-      final isDuplicateDefault = defaultCategories.any(
-        (name) => name.toLowerCase() == categoryName.toLowerCase()
+      if (isDuplicate) {
+        if (!mounted) return;
+        setState(() => _isSubmitting = false);
+        
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: const Text('Category with this name already exists'),
+            backgroundColor: Colors.orange.withOpacity(0.9),
+            behavior: SnackBarBehavior.floating,
+            margin: const EdgeInsets.all(16),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+          ),
+        );
+        return;
+      }
+      
+      // Check against the other category list
+      final otherStorageKey = widget.isDefault ? 'custom_categories' : 'default_categories';
+      final otherCategoriesJson = prefs.getString(otherStorageKey) ?? '[]';
+      final List<dynamic> otherCategories = json.decode(otherCategoriesJson);
+      
+      final isDuplicateOther = otherCategories.any(
+        (cat) => cat['name'].toString().toLowerCase() == categoryName.toLowerCase()
       );
       
-      if (isDuplicate || isDuplicateDefault) {
+      if (isDuplicateOther) {
         if (!mounted) return;
         setState(() => _isSubmitting = false);
         
@@ -110,7 +136,7 @@ class _EditCategoryScreenState extends State<EditCategoryScreen> {
       };
       
       // Save back to SharedPreferences
-      await prefs.setString('custom_categories', json.encode(categories));
+      await prefs.setString(storageKey, json.encode(categories));
       
       if (!mounted) return;
 

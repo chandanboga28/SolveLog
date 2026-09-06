@@ -15,18 +15,56 @@ class PlatformSelectionScreen extends StatefulWidget {
 }
 
 class _PlatformSelectionScreenState extends State<PlatformSelectionScreen> {
+  List<Map<String, String>> _defaultCategories = [];
   List<Map<String, String>> _customCategories = [];
   bool _isLoading = true;
 
   @override
   void initState() {
     super.initState();
-    _loadCustomCategories();
+    _loadCategories();
   }
 
-  Future<void> _loadCustomCategories() async {
+  Future<void> _loadCategories() async {
     try {
       final prefs = await SharedPreferences.getInstance();
+      
+      // Load default categories (or use hardcoded if not found)
+      final defaultCategoriesJson = prefs.getString('default_categories');
+      if (defaultCategoriesJson != null) {
+        final List<dynamic> defaults = json.decode(defaultCategoriesJson);
+        _defaultCategories = defaults
+            .map((cat) => {
+                  'icon': cat['icon'].toString(),
+                  'name': cat['name'].toString(),
+                })
+            .toList();
+        
+        // Migration: Add Miscellaneous if it doesn't exist
+        final hasMiscellaneous = _defaultCategories.any(
+          (cat) => cat['name'] == 'Miscellaneous'
+        );
+        if (!hasMiscellaneous) {
+          _defaultCategories.add({
+            'icon': '📝',
+            'name': 'Miscellaneous',
+          });
+          // Save updated list
+          await prefs.setString('default_categories', json.encode(_defaultCategories));
+        }
+      } else {
+        // Initialize with hardcoded defaults
+        _defaultCategories = [
+          {'icon': '💻', 'name': 'Codeforces'},
+          {'icon': '⚡', 'name': 'LeetCode'},
+          {'icon': '🔷', 'name': 'AtCoder'},
+          {'icon': '📝', 'name': 'Miscellaneous'},
+        ];
+        // Save them to SharedPreferences
+        await prefs.setString('default_categories', json.encode(_defaultCategories));
+      }
+      
+      // Load custom categories
       final categoriesJson = prefs.getString('custom_categories') ?? '[]';
       final List<dynamic> categories = json.decode(categoriesJson);
 
@@ -83,11 +121,11 @@ class _PlatformSelectionScreenState extends State<PlatformSelectionScreen> {
 
     // Reload categories if a new one was added
     if (result == true) {
-      _loadCustomCategories();
+      _loadCategories();
     }
   }
 
-  void _showCategoryOptions(String icon, String name, int index) {
+  void _showCategoryOptions(String icon, String name, int index, bool isDefault) {
     showModalBottomSheet(
       context: context,
       backgroundColor: const Color(0xFF1A1A1A),
@@ -130,7 +168,7 @@ class _PlatformSelectionScreenState extends State<PlatformSelectionScreen> {
                 ),
                 onTap: () {
                   Navigator.pop(context);
-                  _editCategory(icon, name, index);
+                  _editCategory(icon, name, index, isDefault);
                 },
               ),
               // Delete option
@@ -142,7 +180,7 @@ class _PlatformSelectionScreenState extends State<PlatformSelectionScreen> {
                 ),
                 onTap: () {
                   Navigator.pop(context);
-                  _confirmDeleteCategory(icon, name, index);
+                  _confirmDeleteCategory(icon, name, index, isDefault);
                 },
               ),
             ],
@@ -152,24 +190,25 @@ class _PlatformSelectionScreenState extends State<PlatformSelectionScreen> {
     );
   }
 
-  void _editCategory(String icon, String name, int index) async {
+  void _editCategory(String icon, String name, int index, bool isDefault) async {
     final result = await Navigator.of(context).push(
       MaterialPageRoute(
         builder: (context) => EditCategoryScreen(
           originalIcon: icon,
           originalName: name,
           categoryIndex: index,
+          isDefault: isDefault,
         ),
       ),
     );
 
     // Reload categories if updated
     if (result == true) {
-      _loadCustomCategories();
+      _loadCategories();
     }
   }
 
-  void _confirmDeleteCategory(String icon, String name, int index) {
+  void _confirmDeleteCategory(String icon, String name, int index, bool isDefault) {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
@@ -220,7 +259,7 @@ class _PlatformSelectionScreenState extends State<PlatformSelectionScreen> {
           TextButton(
             onPressed: () {
               Navigator.pop(context);
-              _deleteCategory(index, name);
+              _deleteCategory(index, name, isDefault);
             },
             child: const Text(
               'Delete',
@@ -232,19 +271,25 @@ class _PlatformSelectionScreenState extends State<PlatformSelectionScreen> {
     );
   }
 
-  Future<void> _deleteCategory(int index, String name) async {
+  Future<void> _deleteCategory(int index, String name, bool isDefault) async {
     try {
       final prefs = await SharedPreferences.getInstance();
       
-      // Get existing custom categories
-      final categoriesJson = prefs.getString('custom_categories') ?? '[]';
-      final List<dynamic> categories = json.decode(categoriesJson);
-      
-      // Remove category at index
-      categories.removeAt(index);
-      
-      // Save back to SharedPreferences
-      await prefs.setString('custom_categories', json.encode(categories));
+      if (isDefault) {
+        // Delete from default categories
+        final categoriesJson = prefs.getString('default_categories') ?? '[]';
+        final List<dynamic> categories = json.decode(categoriesJson);
+        
+        categories.removeAt(index);
+        await prefs.setString('default_categories', json.encode(categories));
+      } else {
+        // Delete from custom categories
+        final categoriesJson = prefs.getString('custom_categories') ?? '[]';
+        final List<dynamic> categories = json.decode(categoriesJson);
+        
+        categories.removeAt(index);
+        await prefs.setString('custom_categories', json.encode(categories));
+      }
       
       if (!mounted) return;
 
@@ -261,7 +306,7 @@ class _PlatformSelectionScreenState extends State<PlatformSelectionScreen> {
       );
 
       // Reload categories
-      _loadCustomCategories();
+      _loadCategories();
     } catch (e) {
       if (!mounted) return;
 
@@ -328,22 +373,25 @@ class _PlatformSelectionScreenState extends State<PlatformSelectionScreen> {
                   spacing: 16,
                   runSpacing: 16,
                   children: [
-                    // Default categories
-                    PlatformCard(
-                      icon: '💻',
-                      name: 'Codeforces',
-                      onTap: () => _openCategory('💻', 'Codeforces'),
-                    ),
-                    PlatformCard(
-                      icon: '⚡',
-                      name: 'LeetCode',
-                      onTap: () => _openCategory('⚡', 'LeetCode'),
-                    ),
-                    PlatformCard(
-                      icon: '🔷',
-                      name: 'AtCoder',
-                      onTap: () => _openCategory('🔷', 'AtCoder'),
-                    ),
+                    // Default categories (now editable via long press)
+                    ..._defaultCategories.asMap().entries.map((entry) {
+                      final index = entry.key;
+                      final category = entry.value;
+                      return PlatformCard(
+                        icon: category['icon']!,
+                        name: category['name']!,
+                        onTap: () => _openCategory(
+                          category['icon']!,
+                          category['name']!,
+                        ),
+                        onLongPress: () => _showCategoryOptions(
+                          category['icon']!,
+                          category['name']!,
+                          index,
+                          true, // isDefault = true
+                        ),
+                      );
+                    }),
                     // Custom categories
                     ..._customCategories.asMap().entries.map((entry) {
                       final index = entry.key;
@@ -359,6 +407,7 @@ class _PlatformSelectionScreenState extends State<PlatformSelectionScreen> {
                           category['icon']!,
                           category['name']!,
                           index,
+                          false, // isDefault = false
                         ),
                       );
                     }),

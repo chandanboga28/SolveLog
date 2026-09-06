@@ -4,6 +4,7 @@ class PlatformCard extends StatefulWidget {
   final String icon;
   final String name;
   final VoidCallback onTap;
+  final VoidCallback? onLongPress;
   final bool isAddButton;
 
   const PlatformCard({
@@ -11,6 +12,7 @@ class PlatformCard extends StatefulWidget {
     required this.icon,
     required this.name,
     required this.onTap,
+    this.onLongPress,
     this.isAddButton = false,
   }) : super(key: key);
 
@@ -28,8 +30,11 @@ class _PlatformCardState extends State<PlatformCard> {
       onExit: (_) => setState(() => _isHovered = false),
       child: GestureDetector(
         onTap: widget.onTap,
+        onLongPress: widget.onLongPress,
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 200),
+          width: 180,
+          height: 140,
           decoration: BoxDecoration(
             color: widget.isAddButton
                 ? Colors.white.withOpacity(0.05)
@@ -40,7 +45,7 @@ class _PlatformCardState extends State<PlatformCard> {
                   : Colors.white.withOpacity(0.1),
               width: 1.5,
             ),
-            borderRadius: BorderRadius.circular(16),
+            borderRadius: BorderRadius.circular(12),
             boxShadow: _isHovered
                 ? [
                     BoxShadow(
@@ -55,11 +60,12 @@ class _PlatformCardState extends State<PlatformCard> {
             color: Colors.transparent,
             child: InkWell(
               onTap: widget.onTap,
-              borderRadius: BorderRadius.circular(16),
+              onLongPress: widget.onLongPress,
+              borderRadius: BorderRadius.circular(12),
               splashColor: Colors.white.withOpacity(0.05),
               highlightColor: Colors.white.withOpacity(0.03),
               child: Padding(
-                padding: const EdgeInsets.all(24),
+                padding: const EdgeInsets.all(20),
                 child: Column(
                   mainAxisAlignment: MainAxisAlignment.center,
                   crossAxisAlignment: CrossAxisAlignment.center,
@@ -68,17 +74,17 @@ class _PlatformCardState extends State<PlatformCard> {
                     Text(
                       widget.icon,
                       style: const TextStyle(
-                        fontSize: 48,
+                        fontSize: 40,
                         height: 1.2,
                       ),
                     ),
-                    const SizedBox(height: 16),
+                    const SizedBox(height: 12),
                     // Name
                     Text(
                       widget.name,
                       textAlign: TextAlign.center,
                       style: const TextStyle(
-                        fontSize: 16,
+                        fontSize: 15,
                         fontWeight: FontWeight.w600,
                         color: Colors.white,
                         letterSpacing: -0.3,

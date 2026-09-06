@@ -41,8 +41,9 @@ class DatabaseHelper {
 
     return openDatabase(
       path,
-      version: 1,
+      version: 2, // Incremented version for schema update
       onCreate: _onCreate,
+      onUpgrade: _onUpgrade,
     );
   }
 
@@ -68,9 +69,19 @@ class DatabaseHelper {
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         problemId INTEGER NOT NULL,
         approachText TEXT,
+        approachCode TEXT,
         FOREIGN KEY (problemId) REFERENCES problems (id)
       )
     ''');
+  }
+
+  Future<void> _onUpgrade(Database db, int oldVersion, int newVersion) async {
+    if (oldVersion < 2) {
+      // Add approachCode column to existing approaches table
+      await db.execute('''
+        ALTER TABLE approaches ADD COLUMN approachCode TEXT DEFAULT ''
+      ''');
+    }
   }
 
   /// Saves a new problem with its approaches in a transaction.
@@ -82,7 +93,7 @@ class DatabaseHelper {
   /// If anything fails, the entire transaction is rolled back.
   Future<int> insertProblemWithApproaches(
     Problem problem,
-    List<String> approachTexts,
+    List<Map<String, String>> approaches, // Changed to accept text and code
   ) async {
     final db = await database;
 
@@ -95,11 +106,14 @@ class DatabaseHelper {
       final problemId = await txn.insert('problems', problemMap);
 
       // Insert approaches
-      for (final text in approachTexts) {
-        if (text.trim().isNotEmpty) {
+      for (final approach in approaches) {
+        final text = approach['text'] ?? '';
+        final code = approach['code'] ?? '';
+        if (text.trim().isNotEmpty || code.trim().isNotEmpty) {
           await txn.insert('approaches', {
             'problemId': problemId,
             'approachText': text,
+            'approachCode': code,
           });
         }
       }

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'add_problem_screen.dart';
+import 'problem_detail_screen.dart';
 import '../models/problem.dart';
 import '../database/database_helper.dart';
 
@@ -336,7 +337,11 @@ class _CategoryProblemsScreenState extends State<CategoryProblemsScreen> {
       children: _problems.map((problem) {
         return Padding(
           padding: const EdgeInsets.only(bottom: 12),
-          child: _ProblemCard(problem: problem),
+          child: _ProblemCard(
+            problem: problem,
+            categoryIcon: widget.categoryIcon,
+            categoryName: widget.categoryName,
+          ),
         );
       }).toList(),
     );
@@ -390,100 +395,123 @@ class _StatCard extends StatelessWidget {
 
 class _ProblemCard extends StatelessWidget {
   final Problem problem;
+  final String categoryIcon;
+  final String categoryName;
 
   const _ProblemCard({
     Key? key,
     required this.problem,
+    required this.categoryIcon,
+    required this.categoryName,
   }) : super(key: key);
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: const Color(0xFF1A1A1A),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.white.withOpacity(0.1)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Expanded(
-                child: Text(
-                  problem.problemName,
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 16,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ),
-              if (problem.rating.isNotEmpty)
-                Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: Colors.white.withOpacity(0.08),
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: Colors.white.withOpacity(0.1)),
-                  ),
+    return GestureDetector(
+      onTap: () {
+        Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (context) => ProblemDetailScreen(
+              problemId: problem.id!,
+              categoryIcon: categoryIcon,
+              categoryName: categoryName,
+            ),
+          ),
+        );
+      },
+      child: Container(
+        padding: const EdgeInsets.all(20),
+        decoration: BoxDecoration(
+          color: const Color(0xFF1A1A1A),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: Colors.white.withOpacity(0.1)),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Expanded(
                   child: Text(
-                    problem.rating,
-                    style: TextStyle(
-                      color: Colors.white.withOpacity(0.7),
-                      fontSize: 12,
+                    problem.problemName,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 16,
                       fontWeight: FontWeight.w600,
                     ),
                   ),
                 ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          Row(
-            children: [
-              Text(
-                'ID: ${problem.problemId}',
-                style: TextStyle(
-                  color: Colors.white.withOpacity(0.5),
-                  fontSize: 13,
-                ),
-              ),
-              if (problem.createdAt != null) ...[
-                const SizedBox(width: 12),
-                Text(
-                  '•',
-                  style: TextStyle(
-                    color: Colors.white.withOpacity(0.3),
-                    fontSize: 13,
+                if (problem.rating.isNotEmpty)
+                  Container(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withOpacity(0.08),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: Colors.white.withOpacity(0.1)),
+                    ),
+                    child: Text(
+                      problem.rating,
+                      style: TextStyle(
+                        color: Colors.white.withOpacity(0.7),
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
                   ),
+                const SizedBox(width: 8),
+                Icon(
+                  Icons.arrow_forward_ios,
+                  size: 16,
+                  color: Colors.white.withOpacity(0.3),
                 ),
-                const SizedBox(width: 12),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Row(
+              children: [
                 Text(
-                  _formatDate(problem.createdAt!),
+                  'ID: ${problem.problemId}',
                   style: TextStyle(
                     color: Colors.white.withOpacity(0.5),
                     fontSize: 13,
                   ),
                 ),
+                if (problem.createdAt != null) ...[
+                  const SizedBox(width: 12),
+                  Text(
+                    '•',
+                    style: TextStyle(
+                      color: Colors.white.withOpacity(0.3),
+                      fontSize: 13,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Text(
+                    _formatDate(problem.createdAt!),
+                    style: TextStyle(
+                      color: Colors.white.withOpacity(0.5),
+                      fontSize: 13,
+                    ),
+                  ),
+                ],
               ],
-            ],
-          ),
-          if (problem.questionUnderstanding.isNotEmpty) ...[
-            const SizedBox(height: 12),
-            Text(
-              problem.questionUnderstanding,
-              style: TextStyle(
-                color: Colors.white.withOpacity(0.7),
-                fontSize: 14,
-                height: 1.4,
-              ),
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
             ),
+            if (problem.questionUnderstanding.isNotEmpty) ...[
+              const SizedBox(height: 12),
+              Text(
+                problem.questionUnderstanding,
+                style: TextStyle(
+                  color: Colors.white.withOpacity(0.7),
+                  fontSize: 14,
+                  height: 1.4,
+                ),
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ],
           ],
-        ],
+        ),
       ),
     );
   }

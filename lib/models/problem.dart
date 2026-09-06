@@ -74,11 +74,13 @@ class Approach {
   final int? id;
   final int problemId;
   final String approachText;
+  final String approachCode;
 
   Approach({
     this.id,
     required this.problemId,
     required this.approachText,
+    this.approachCode = '',
   });
 
   /// Converts this approach into a Map so it can be saved to SQLite.
@@ -87,6 +89,7 @@ class Approach {
       'id': id,
       'problemId': problemId,
       'approachText': approachText,
+      'approachCode': approachCode,
     };
   }
 
@@ -96,6 +99,7 @@ class Approach {
       id: map['id'] as int?,
       problemId: map['problemId'] as int,
       approachText: map['approachText'] as String? ?? '',
+      approachCode: map['approachCode'] as String? ?? '',
     );
   }
 }

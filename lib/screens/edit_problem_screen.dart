@@ -3,48 +3,80 @@ import 'package:flutter/services.dart';
 import '../models/problem.dart';
 import '../database/database_helper.dart';
 
-/// The Add Problem screen — a form for logging a new problem under the
-/// current category (Codeforces, LeetCode, AtCoder, etc.).
+/// Screen for editing an existing problem.
 ///
-/// When "Save Problem" is clicked, the problem and its approaches are
-/// saved to the local SQLite database in a transaction.
-class AddProblemScreen extends StatefulWidget {
+/// Allows users to update all problem fields and add/remove approaches.
+/// Pre-fills the form with existing data.
+class EditProblemScreen extends StatefulWidget {
+  final Problem problem;
+  final List<Approach> approaches;
   final String categoryIcon;
   final String categoryName;
 
-  const AddProblemScreen({
+  const EditProblemScreen({
     Key? key,
+    required this.problem,
+    required this.approaches,
     required this.categoryIcon,
     required this.categoryName,
   }) : super(key: key);
 
   @override
-  State<AddProblemScreen> createState() => _AddProblemScreenState();
+  State<EditProblemScreen> createState() => _EditProblemScreenState();
 }
 
-class _AddProblemScreenState extends State<AddProblemScreen> {
+class _EditProblemScreenState extends State<EditProblemScreen> {
   final GlobalKey<FormState> _formKey = GlobalKey<FormState>();
 
-  final TextEditingController _nameController = TextEditingController();
-  final TextEditingController _idController = TextEditingController();
-  final TextEditingController _ratingController = TextEditingController();
-  final TextEditingController _linkController = TextEditingController();
-  final TextEditingController _codeController = TextEditingController();
-  final TextEditingController _understandingController =
-      TextEditingController();
-  final TextEditingController _problemsFacedController =
-      TextEditingController();
-  final TextEditingController _learntController = TextEditingController();
+  late final TextEditingController _nameController;
+  late final TextEditingController _idController;
+  late final TextEditingController _ratingController;
+  late final TextEditingController _linkController;
+  late final TextEditingController _codeController;
+  late final TextEditingController _understandingController;
+  late final TextEditingController _problemsFacedController;
+  late final TextEditingController _learntController;
 
   // Each approach has two controllers: one for text, one for code
-  final List<Map<String, TextEditingController>> _approachControllers = [
-    {
-      'text': TextEditingController(),
-      'code': TextEditingController(),
-    },
-  ];
+  final List<Map<String, TextEditingController>> _approachControllers = [];
 
   bool _isSubmitting = false;
+
+  @override
+  void initState() {
+    super.initState();
+    
+    // Initialize controllers with existing data
+    _nameController = TextEditingController(text: widget.problem.problemName);
+    _idController = TextEditingController(text: widget.problem.problemId);
+    _ratingController = TextEditingController(text: widget.problem.rating);
+    _linkController = TextEditingController(text: widget.problem.problemLink);
+    _codeController = TextEditingController(text: widget.problem.code);
+    _understandingController = TextEditingController(
+      text: widget.problem.questionUnderstanding,
+    );
+    _problemsFacedController = TextEditingController(
+      text: widget.problem.problemsFaced,
+    );
+    _learntController = TextEditingController(
+      text: widget.problem.anyNewThingLearnt,
+    );
+
+    // Initialize approach controllers with existing approaches
+    if (widget.approaches.isEmpty) {
+      _approachControllers.add({
+        'text': TextEditingController(),
+        'code': TextEditingController(),
+      });
+    } else {
+      for (final approach in widget.approaches) {
+        _approachControllers.add({
+          'text': TextEditingController(text: approach.approachText),
+          'code': TextEditingController(text: approach.approachCode),
+        });
+      }
+    }
+  }
 
   @override
   void dispose() {
@@ -87,7 +119,7 @@ class _AddProblemScreenState extends State<AddProblemScreen> {
     return null;
   }
 
-  Future<void> _handleSave() async {
+  Future<void> _handleUpdate() async {
     if (!_formKey.currentState!.validate()) {
       return;
     }
@@ -95,6 +127,8 @@ class _AddProblemScreenState extends State<AddProblemScreen> {
     setState(() => _isSubmitting = true);
 
     try {
+      final db = DatabaseHelper.instance;
+
       // Gather approaches (text + code)
       final approaches = _approachControllers
           .map((controllers) => {
@@ -105,31 +139,48 @@ class _AddProblemScreenState extends State<AddProblemScreen> {
               approach['text']!.isNotEmpty || approach['code']!.isNotEmpty)
           .toList();
 
-      // Create the Problem object
-      final problem = Problem(
-        category: widget.categoryName,
-        problemName: _nameController.text.trim(),
-        problemId: _idController.text.trim(),
-        rating: _ratingController.text.trim(),
-        problemLink: _linkController.text.trim(),
-        code: _codeController.text.trim(),
-        questionUnderstanding: _understandingController.text.trim(),
-        problemsFaced: _problemsFacedController.text.trim(),
-        anyNewThingLearnt: _learntController.text.trim(),
-      );
+      // Update in transaction
+      await (await db.database).transaction((txn) async {
+        // Update problem
+        await txn.update(
+          'problems',
+          {
+            'problemName': _nameController.text.trim(),
+            'problemId': _idController.text.trim(),
+            'rating': _ratingController.text.trim(),
+            'problemLink': _linkController.text.trim(),
+            'code': _codeController.text.trim(),
+            'questionUnderstanding': _understandingController.text.trim(),
+            'problemsFaced': _problemsFacedController.text.trim(),
+            'anyNewThingLearnt': _learntController.text.trim(),
+          },
+          where: 'id = ?',
+          whereArgs: [widget.problem.id],
+        );
 
-      // Save to database (problem + approaches in a transaction)
-      await DatabaseHelper.instance.insertProblemWithApproaches(
-        problem,
-        approaches,
-      );
+        // Delete old approaches
+        await txn.delete(
+          'approaches',
+          where: 'problemId = ?',
+          whereArgs: [widget.problem.id],
+        );
+
+        // Insert new approaches
+        for (final approach in approaches) {
+          await txn.insert('approaches', {
+            'problemId': widget.problem.id,
+            'approachText': approach['text'],
+            'approachCode': approach['code'],
+          });
+        }
+      });
 
       if (!mounted) return;
 
       // Show success message
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: const Text('Problem added successfully!'),
+          content: const Text('Problem updated successfully!'),
           duration: const Duration(seconds: 2),
           backgroundColor: Colors.green.withOpacity(0.9),
           behavior: SnackBarBehavior.floating,
@@ -139,21 +190,18 @@ class _AddProblemScreenState extends State<AddProblemScreen> {
         ),
       );
 
-      // Brief pause so the success message is visible before navigating back.
       await Future.delayed(const Duration(milliseconds: 500));
       if (!mounted) return;
 
-      // Return to category screen (which will reload the problem list)
-      Navigator.of(context).pop(true); // Pass true to indicate success
+      Navigator.of(context).pop(true); // Return true to trigger reload
     } catch (e) {
-      // Handle database error
       if (!mounted) return;
-      
+
       setState(() => _isSubmitting = false);
 
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Failed to save problem: ${e.toString()}'),
+          content: Text('Failed to update problem: ${e.toString()}'),
           duration: const Duration(seconds: 3),
           backgroundColor: Colors.redAccent.withOpacity(0.9),
           behavior: SnackBarBehavior.floating,
@@ -369,7 +417,6 @@ class _AddProblemScreenState extends State<AddProblemScreen> {
     );
   }
 
-  // Top bar: back button, "Add Problem" title, category badge
   Widget _buildTopBar() {
     return Row(
       children: [
@@ -380,7 +427,7 @@ class _AddProblemScreenState extends State<AddProblemScreen> {
         ),
         const SizedBox(width: 8),
         const Text(
-          'Add Problem',
+          'Edit Problem',
           style: TextStyle(
             color: Colors.white,
             fontSize: 22,
@@ -588,7 +635,7 @@ class _AddProblemScreenState extends State<AddProblemScreen> {
         const SizedBox(width: 16),
         Expanded(
           child: ElevatedButton(
-            onPressed: _isSubmitting ? null : _handleSave,
+            onPressed: _isSubmitting ? null : _handleUpdate,
             style: ElevatedButton.styleFrom(
               backgroundColor: Colors.white.withOpacity(0.12),
               foregroundColor: Colors.white,
@@ -609,7 +656,7 @@ class _AddProblemScreenState extends State<AddProblemScreen> {
                     ),
                   )
                 : const Text(
-                    'Save Problem',
+                    'Update Problem',
                     style: TextStyle(fontWeight: FontWeight.w600),
                   ),
           ),

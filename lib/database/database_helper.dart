@@ -41,7 +41,7 @@ class DatabaseHelper {
 
     return openDatabase(
       path,
-      version: 2, // Incremented version for schema update
+      version: 3, // Incremented version for do_later table
       onCreate: _onCreate,
       onUpgrade: _onUpgrade,
     );
@@ -73,6 +73,17 @@ class DatabaseHelper {
         FOREIGN KEY (problemId) REFERENCES problems (id)
       )
     ''');
+
+    await db.execute('''
+      CREATE TABLE do_later (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        category TEXT NOT NULL,
+        problemId TEXT,
+        problemLink TEXT,
+        reason TEXT NOT NULL,
+        createdAt TEXT NOT NULL
+      )
+    ''');
   }
 
   Future<void> _onUpgrade(Database db, int oldVersion, int newVersion) async {
@@ -80,6 +91,19 @@ class DatabaseHelper {
       // Add approachCode column to existing approaches table
       await db.execute('''
         ALTER TABLE approaches ADD COLUMN approachCode TEXT DEFAULT ''
+      ''');
+    }
+    if (oldVersion < 3) {
+      // Add do_later table for problems to do later
+      await db.execute('''
+        CREATE TABLE do_later (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          category TEXT NOT NULL,
+          problemId TEXT,
+          problemLink TEXT,
+          reason TEXT NOT NULL,
+          createdAt TEXT NOT NULL
+        )
       ''');
     }
   }
@@ -222,6 +246,63 @@ class DatabaseHelper {
 
     final result = await db.rawQuery(
       'SELECT COUNT(*) as count FROM problems WHERE category = ?',
+      [category],
+    );
+
+    return Sqflite.firstIntValue(result) ?? 0;
+  }
+
+  // Do Later operations
+  
+  /// Adds a problem to the "Do Later" list.
+  Future<int> insertDoLater({
+    required String category,
+    String? problemId,
+    String? problemLink,
+    required String reason,
+  }) async {
+    final db = await database;
+
+    return db.insert('do_later', {
+      'category': category,
+      'problemId': problemId,
+      'problemLink': problemLink,
+      'reason': reason,
+      'createdAt': DateTime.now().toIso8601String(),
+    });
+  }
+
+  /// Returns all "Do Later" problems for a category.
+  Future<List<Map<String, dynamic>>> getDoLaterByCategory(String category) async {
+    final db = await database;
+
+    final rows = await db.query(
+      'do_later',
+      where: 'category = ?',
+      whereArgs: [category],
+      orderBy: 'createdAt DESC',
+    );
+
+    return rows;
+  }
+
+  /// Deletes a "Do Later" problem.
+  Future<void> deleteDoLater(int id) async {
+    final db = await database;
+
+    await db.delete(
+      'do_later',
+      where: 'id = ?',
+      whereArgs: [id],
+    );
+  }
+
+  /// Returns the count of "Do Later" problems in a category.
+  Future<int> getDoLaterCountByCategory(String category) async {
+    final db = await database;
+
+    final result = await db.rawQuery(
+      'SELECT COUNT(*) as count FROM do_later WHERE category = ?',
       [category],
     );
 

@@ -1,5 +1,8 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'add_problem_screen.dart';
+import 'add_do_later_screen.dart';
 import 'problem_detail_screen.dart';
 import '../models/problem.dart';
 import '../database/database_helper.dart';
@@ -29,8 +32,13 @@ class _CategoryProblemsScreenState extends State<CategoryProblemsScreen> {
 
   List<Problem> _problems = [];
   List<Problem> _filteredProblems = [];
+  List<Map<String, dynamic>> _doLaterProblems = [];
   bool _isLoading = true;
   int _problemCount = 0;
+  int _doLaterCount = 0;
+
+  // Tab selection: 'problems' or 'do_later'
+  String _selectedTab = 'problems';
 
   // Sort options
   String _sortBy = 'Date: Latest First'; // Default sort
@@ -50,6 +58,7 @@ class _CategoryProblemsScreenState extends State<CategoryProblemsScreen> {
   void initState() {
     super.initState();
     _loadProblems();
+    _loadDoLater();
   }
 
   @override
@@ -88,10 +97,35 @@ class _CategoryProblemsScreenState extends State<CategoryProblemsScreen> {
     }
   }
 
+  Future<void> _loadDoLater() async {
+    try {
+      final doLaterList = await DatabaseHelper.instance
+          .getDoLaterByCategory(widget.categoryName);
+      final count = await DatabaseHelper.instance
+          .getDoLaterCountByCategory(widget.categoryName);
+
+      if (mounted) {
+        setState(() {
+          _doLaterProblems = doLaterList;
+          _doLaterCount = count;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to load do later: ${e.toString()}'),
+            backgroundColor: Colors.redAccent.withOpacity(0.9),
+          ),
+        );
+      }
+    }
+  }
+
   void _applyFiltersAndSort() {
     List<Problem> filtered = List.from(_problems);
 
-    // Apply date filter
+    // Apply date filter (independent)
     if (_dateRange != null) {
       filtered = filtered.where((problem) {
         if (problem.createdAt == null) return false;
@@ -107,7 +141,7 @@ class _CategoryProblemsScreenState extends State<CategoryProblemsScreen> {
       }).toList();
     }
 
-    // Apply rating filter
+    // Apply rating filter (independent)
     if (_ratingMin != null || _ratingMax != null) {
       filtered = filtered.where((problem) {
         if (problem.rating.isEmpty) return false;
@@ -115,20 +149,24 @@ class _CategoryProblemsScreenState extends State<CategoryProblemsScreen> {
           final rating = int.tryParse(problem.rating);
           if (rating == null) return false;
           
-          if (_ratingMin != null && _ratingMax != null) {
+          bool passesMin = true;
+          bool passesMax = true;
+          
+          if (_ratingMin != null && _ratingMin!.isNotEmpty) {
             final min = int.tryParse(_ratingMin!);
-            final max = int.tryParse(_ratingMax!);
-            if (min != null && max != null) {
-              return rating >= min && rating <= max;
+            if (min != null) {
+              passesMin = rating >= min;
             }
-          } else if (_ratingMin != null) {
-            final min = int.tryParse(_ratingMin!);
-            if (min != null) return rating >= min;
-          } else if (_ratingMax != null) {
-            final max = int.tryParse(_ratingMax!);
-            if (max != null) return rating <= max;
           }
-          return true;
+          
+          if (_ratingMax != null && _ratingMax!.isNotEmpty) {
+            final max = int.tryParse(_ratingMax!);
+            if (max != null) {
+              passesMax = rating <= max;
+            }
+          }
+          
+          return passesMin && passesMax;
         } catch (e) {
           return false;
         }
@@ -183,6 +221,22 @@ class _CategoryProblemsScreenState extends State<CategoryProblemsScreen> {
     }
   }
 
+  void _openAddDoLater() async {
+    final result = await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (context) => AddDoLaterScreen(
+          categoryIcon: widget.categoryIcon,
+          categoryName: widget.categoryName,
+        ),
+      ),
+    );
+
+    // If a do later was added, reload the list
+    if (result == true) {
+      _loadDoLater();
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -200,15 +254,21 @@ class _CategoryProblemsScreenState extends State<CategoryProblemsScreen> {
                   const SizedBox(height: 32),
                   _buildStatistics(),
                   const SizedBox(height: 28),
-                  _buildSearchBar(),
-                  const SizedBox(height: 20),
-                  _buildSortAndFilterBar(),
-                  const SizedBox(height: 40),
-                  _isLoading
-                      ? _buildLoadingState()
-                      : _filteredProblems.isEmpty
-                          ? _buildEmptyState()
-                          : _buildProblemsList(),
+                  _buildTabs(),
+                  const SizedBox(height: 28),
+                  if (_selectedTab == 'problems') ...[
+                    _buildSearchBar(),
+                    const SizedBox(height: 20),
+                    _buildSortAndFilterBar(),
+                    const SizedBox(height: 40),
+                    _isLoading
+                        ? _buildLoadingState()
+                        : _filteredProblems.isEmpty
+                            ? _buildEmptyState()
+                            : _buildProblemsList(),
+                  ] else ...[
+                    _buildDoLaterList(),
+                  ],
                 ],
               ),
             ),
@@ -246,9 +306,9 @@ class _CategoryProblemsScreenState extends State<CategoryProblemsScreen> {
           ),
         ),
         ElevatedButton.icon(
-          onPressed: _openAddProblem,
+          onPressed: _selectedTab == 'problems' ? _openAddProblem : _openAddDoLater,
           icon: const Icon(Icons.add, size: 18),
-          label: const Text('Add Problem'),
+          label: Text(_selectedTab == 'problems' ? 'Add Problem' : 'Add to Do Later'),
           style: ElevatedButton.styleFrom(
             backgroundColor: Colors.white.withOpacity(0.08),
             foregroundColor: Colors.white,
@@ -278,8 +338,78 @@ class _CategoryProblemsScreenState extends State<CategoryProblemsScreen> {
         const SizedBox(width: 16),
         Expanded(
           child: _StatCard(
-            label: 'Current Streak',
-            value: '🔥 0 Day Streak',
+            label: 'Do Later',
+            value: '$_doLaterCount ${_doLaterCount == 1 ? 'Problem' : 'Problems'}',
+          ),
+        ),
+      ],
+    );
+  }
+
+  // 3. Tabs: Problems and Do Later
+  Widget _buildTabs() {
+    return Row(
+      children: [
+        Expanded(
+          child: GestureDetector(
+            onTap: () => setState(() => _selectedTab = 'problems'),
+            child: Container(
+              padding: const EdgeInsets.symmetric(vertical: 12),
+              decoration: BoxDecoration(
+                border: Border(
+                  bottom: BorderSide(
+                    color: _selectedTab == 'problems'
+                        ? Colors.white
+                        : Colors.transparent,
+                    width: 2,
+                  ),
+                ),
+              ),
+              child: Text(
+                'Problems',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  color: _selectedTab == 'problems'
+                      ? Colors.white
+                      : Colors.white.withOpacity(0.5),
+                  fontSize: 15,
+                  fontWeight: _selectedTab == 'problems'
+                      ? FontWeight.w600
+                      : FontWeight.w400,
+                ),
+              ),
+            ),
+          ),
+        ),
+        Expanded(
+          child: GestureDetector(
+            onTap: () => setState(() => _selectedTab = 'do_later'),
+            child: Container(
+              padding: const EdgeInsets.symmetric(vertical: 12),
+              decoration: BoxDecoration(
+                border: Border(
+                  bottom: BorderSide(
+                    color: _selectedTab == 'do_later'
+                        ? Colors.white
+                        : Colors.transparent,
+                    width: 2,
+                  ),
+                ),
+              ),
+              child: Text(
+                'Do Later',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  color: _selectedTab == 'do_later'
+                      ? Colors.white
+                      : Colors.white.withOpacity(0.5),
+                  fontSize: 15,
+                  fontWeight: _selectedTab == 'do_later'
+                      ? FontWeight.w600
+                      : FontWeight.w400,
+                ),
+              ),
+            ),
           ),
         ),
       ],
@@ -345,7 +475,7 @@ class _CategoryProblemsScreenState extends State<CategoryProblemsScreen> {
                 Icon(Icons.sort, color: Colors.white.withOpacity(0.7), size: 18),
                 const SizedBox(width: 8),
                 Text(
-                  _sortBy,
+                  'Sort By',
                   style: TextStyle(
                     color: Colors.white.withOpacity(0.9),
                     fontSize: 13,
@@ -477,8 +607,6 @@ class _CategoryProblemsScreenState extends State<CategoryProblemsScreen> {
   }
 
   void _showFilterOptions() {
-    final dateMinController = TextEditingController();
-    final dateMaxController = TextEditingController();
     final ratingMinController = TextEditingController(text: _ratingMin ?? '');
     final ratingMaxController = TextEditingController(text: _ratingMax ?? '');
 
@@ -539,14 +667,142 @@ class _CategoryProblemsScreenState extends State<CategoryProblemsScreen> {
                   const Divider(color: Colors.white12),
                   const SizedBox(height: 16),
                   
-                  // Date Range Filter
-                  Text(
-                    'Date Range',
-                    style: TextStyle(
-                      color: Colors.white.withOpacity(0.9),
-                      fontSize: 14,
-                      fontWeight: FontWeight.w600,
-                    ),
+                  // Rating Range Section
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        'Rating',
+                        style: TextStyle(
+                          color: Colors.white.withOpacity(0.9),
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      if (ratingMinController.text.isNotEmpty || ratingMaxController.text.isNotEmpty)
+                        TextButton.icon(
+                          onPressed: () {
+                            setModalState(() {
+                              ratingMinController.clear();
+                              ratingMaxController.clear();
+                            });
+                          },
+                          icon: const Icon(Icons.clear, size: 14, color: Colors.redAccent),
+                          label: const Text(
+                            'Clear',
+                            style: TextStyle(color: Colors.redAccent, fontSize: 12),
+                          ),
+                          style: TextButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                            minimumSize: Size.zero,
+                            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                          ),
+                        ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: TextField(
+                          controller: ratingMinController,
+                          style: const TextStyle(color: Colors.white),
+                          keyboardType: TextInputType.number,
+                          decoration: InputDecoration(
+                            hintText: 'Min',
+                            hintStyle: TextStyle(color: Colors.white.withOpacity(0.3)),
+                            filled: true,
+                            fillColor: Colors.white.withOpacity(0.05),
+                            contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+                            border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(8),
+                              borderSide: BorderSide(color: Colors.white.withOpacity(0.1)),
+                            ),
+                            enabledBorder: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(8),
+                              borderSide: BorderSide(color: Colors.white.withOpacity(0.1)),
+                            ),
+                            focusedBorder: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(8),
+                              borderSide: BorderSide(color: Colors.white.withOpacity(0.3)),
+                            ),
+                          ),
+                          onChanged: (value) {
+                            setModalState(() {});
+                          },
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Text(
+                        'to',
+                        style: TextStyle(color: Colors.white.withOpacity(0.5)),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: TextField(
+                          controller: ratingMaxController,
+                          style: const TextStyle(color: Colors.white),
+                          keyboardType: TextInputType.number,
+                          decoration: InputDecoration(
+                            hintText: 'Max',
+                            hintStyle: TextStyle(color: Colors.white.withOpacity(0.3)),
+                            filled: true,
+                            fillColor: Colors.white.withOpacity(0.05),
+                            contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+                            border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(8),
+                              borderSide: BorderSide(color: Colors.white.withOpacity(0.1)),
+                            ),
+                            enabledBorder: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(8),
+                              borderSide: BorderSide(color: Colors.white.withOpacity(0.1)),
+                            ),
+                            focusedBorder: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(8),
+                              borderSide: BorderSide(color: Colors.white.withOpacity(0.3)),
+                            ),
+                          ),
+                          onChanged: (value) {
+                            setModalState(() {});
+                          },
+                        ),
+                      ),
+                    ],
+                  ),
+                  
+                  const SizedBox(height: 24),
+                  
+                  // Date Range Section
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        'Date',
+                        style: TextStyle(
+                          color: Colors.white.withOpacity(0.9),
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      if (tempDateRange != null)
+                        TextButton.icon(
+                          onPressed: () {
+                            setModalState(() {
+                              tempDateRange = null;
+                            });
+                          },
+                          icon: const Icon(Icons.clear, size: 14, color: Colors.redAccent),
+                          label: const Text(
+                            'Clear',
+                            style: TextStyle(color: Colors.redAccent, fontSize: 12),
+                          ),
+                          style: TextButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                            minimumSize: Size.zero,
+                            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                          ),
+                        ),
+                    ],
                   ),
                   const SizedBox(height: 12),
                   GestureDetector(
@@ -598,97 +854,6 @@ class _CategoryProblemsScreenState extends State<CategoryProblemsScreen> {
                         ],
                       ),
                     ),
-                  ),
-                  if (tempDateRange != null)
-                    Padding(
-                      padding: const EdgeInsets.only(top: 8),
-                      child: TextButton.icon(
-                        onPressed: () {
-                          setModalState(() {
-                            tempDateRange = null;
-                          });
-                        },
-                        icon: const Icon(Icons.clear, size: 16, color: Colors.redAccent),
-                        label: const Text(
-                          'Clear date range',
-                          style: TextStyle(color: Colors.redAccent, fontSize: 12),
-                        ),
-                      ),
-                    ),
-                  
-                  const SizedBox(height: 24),
-                  
-                  // Rating Range Filter
-                  Text(
-                    'Rating Range',
-                    style: TextStyle(
-                      color: Colors.white.withOpacity(0.9),
-                      fontSize: 14,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: TextField(
-                          controller: ratingMinController,
-                          style: const TextStyle(color: Colors.white),
-                          keyboardType: TextInputType.number,
-                          decoration: InputDecoration(
-                            hintText: 'Min',
-                            hintStyle: TextStyle(color: Colors.white.withOpacity(0.3)),
-                            filled: true,
-                            fillColor: Colors.white.withOpacity(0.05),
-                            contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
-                            border: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(8),
-                              borderSide: BorderSide(color: Colors.white.withOpacity(0.1)),
-                            ),
-                            enabledBorder: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(8),
-                              borderSide: BorderSide(color: Colors.white.withOpacity(0.1)),
-                            ),
-                            focusedBorder: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(8),
-                              borderSide: BorderSide(color: Colors.white.withOpacity(0.3)),
-                            ),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Text(
-                        'to',
-                        style: TextStyle(color: Colors.white.withOpacity(0.5)),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: TextField(
-                          controller: ratingMaxController,
-                          style: const TextStyle(color: Colors.white),
-                          keyboardType: TextInputType.number,
-                          decoration: InputDecoration(
-                            hintText: 'Max',
-                            hintStyle: TextStyle(color: Colors.white.withOpacity(0.3)),
-                            filled: true,
-                            fillColor: Colors.white.withOpacity(0.05),
-                            contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
-                            border: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(8),
-                              borderSide: BorderSide(color: Colors.white.withOpacity(0.1)),
-                            ),
-                            enabledBorder: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(8),
-                              borderSide: BorderSide(color: Colors.white.withOpacity(0.1)),
-                            ),
-                            focusedBorder: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(8),
-                              borderSide: BorderSide(color: Colors.white.withOpacity(0.3)),
-                            ),
-                          ),
-                        ),
-                      ),
-                    ],
                   ),
                   const SizedBox(height: 20),
                 ],
@@ -793,6 +958,81 @@ class _CategoryProblemsScreenState extends State<CategoryProblemsScreen> {
       }).toList(),
     );
   }
+
+  // 8. Do Later list
+  Widget _buildDoLaterList() {
+    if (_doLaterProblems.isEmpty) {
+      return Container(
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(vertical: 64, horizontal: 24),
+        decoration: BoxDecoration(
+          color: const Color(0xFF1A1A1A),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: Colors.white.withOpacity(0.1)),
+        ),
+        child: Column(
+          children: [
+            Icon(
+              Icons.schedule_outlined,
+              size: 44,
+              color: Colors.white.withOpacity(0.3),
+            ),
+            const SizedBox(height: 20),
+            const Text(
+              'No problems to do later',
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: 17,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Add problems you want to solve later.',
+              style: TextStyle(
+                color: Colors.white.withOpacity(0.5),
+                fontSize: 14,
+              ),
+            ),
+            const SizedBox(height: 28),
+            ElevatedButton.icon(
+              onPressed: _openAddDoLater,
+              icon: const Icon(Icons.add, size: 18),
+              label: const Text('Add to Do Later'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.white.withOpacity(0.08),
+                foregroundColor: Colors.white,
+                elevation: 0,
+                padding: const EdgeInsets.symmetric(
+                    horizontal: 20, vertical: 14),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10),
+                  side: BorderSide(color: Colors.white.withOpacity(0.12)),
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return Column(
+      children: _doLaterProblems.map((doLater) {
+        return Padding(
+          padding: const EdgeInsets.only(bottom: 12),
+          child: _DoLaterCard(
+            doLater: doLater,
+            categoryIcon: widget.categoryIcon,
+            categoryName: widget.categoryName,
+            onDelete: () async {
+              _loadDoLater();
+              _loadProblems(); // Reload problems in case one was added
+            },
+          ),
+        );
+      }).toList(),
+    );
+  }
 }
 
 class _StatCard extends StatelessWidget {
@@ -851,6 +1091,42 @@ class _ProblemCard extends StatelessWidget {
     required this.categoryIcon,
     required this.categoryName,
   }) : super(key: key);
+
+  void _openLink(BuildContext context, String link) async {
+    try {
+      final result = await Process.run('open', [link]);
+      if (result.exitCode != 0) {
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Could not open link: ${result.stderr}'),
+              backgroundColor: Colors.redAccent.withOpacity(0.9),
+            ),
+          );
+        }
+      }
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to open link: $e'),
+            backgroundColor: Colors.redAccent.withOpacity(0.9),
+          ),
+        );
+      }
+    }
+  }
+
+  void _copyLink(BuildContext context, String link) {
+    Clipboard.setData(ClipboardData(text: link));
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: const Text('Link copied to clipboard'),
+        backgroundColor: Colors.green.withOpacity(0.9),
+        duration: const Duration(seconds: 2),
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -952,6 +1228,46 @@ class _ProblemCard extends StatelessWidget {
                 ),
               ],
             ),
+            if (problem.problemLink.isNotEmpty) ...[
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  Icon(
+                    Icons.link,
+                    size: 14,
+                    color: Colors.blue.withOpacity(0.7),
+                  ),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: GestureDetector(
+                      onTap: () => _openLink(context, problem.problemLink),
+                      child: Text(
+                        problem.problemLink,
+                        style: TextStyle(
+                          color: Colors.blue.withOpacity(0.7),
+                          fontSize: 13,
+                          decoration: TextDecoration.underline,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 4),
+                  GestureDetector(
+                    onTap: () => _copyLink(context, problem.problemLink),
+                    child: Padding(
+                      padding: const EdgeInsets.all(4),
+                      child: Icon(
+                        Icons.copy,
+                        size: 14,
+                        color: Colors.white.withOpacity(0.5),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ],
             if (problem.questionUnderstanding.isNotEmpty) ...[
               const SizedBox(height: 12),
               Text(
@@ -1024,5 +1340,246 @@ class _ProblemCard extends StatelessWidget {
     } catch (e) {
       return '';
     }
+  }
+}
+
+class _DoLaterCard extends StatelessWidget {
+  final Map<String, dynamic> doLater;
+  final VoidCallback onDelete;
+  final String categoryIcon;
+  final String categoryName;
+
+  const _DoLaterCard({
+    Key? key,
+    required this.doLater,
+    required this.onDelete,
+    required this.categoryIcon,
+    required this.categoryName,
+  }) : super(key: key);
+
+  void _openLink(BuildContext context, String link) async {
+    // Try to open the link in the default browser
+    try {
+      final uri = Uri.parse(link);
+      // For macOS, we can use the 'open' command
+      final result = await Process.run('open', [link]);
+      if (result.exitCode != 0) {
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Could not open link: ${result.stderr}'),
+              backgroundColor: Colors.redAccent.withOpacity(0.9),
+            ),
+          );
+        }
+      }
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to open link: $e'),
+            backgroundColor: Colors.redAccent.withOpacity(0.9),
+          ),
+        );
+      }
+    }
+  }
+
+  void _copyLink(BuildContext context, String link) {
+    Clipboard.setData(ClipboardData(text: link));
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: const Text('Link copied to clipboard'),
+        backgroundColor: Colors.green.withOpacity(0.9),
+        duration: const Duration(seconds: 2),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final problemId = doLater['problemId'] as String?;
+    final problemLink = doLater['problemLink'] as String?;
+    final reason = doLater['reason'] as String;
+
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: const Color(0xFF1A1A1A),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.white.withOpacity(0.1)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    if (problemId != null && problemId.isNotEmpty)
+                      Text(
+                        'Problem ID: $problemId',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 16,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    if (problemLink != null && problemLink.isNotEmpty) ...[
+                      if (problemId != null && problemId.isNotEmpty)
+                        const SizedBox(height: 8),
+                      Row(
+                        children: [
+                          Icon(
+                            Icons.link,
+                            size: 14,
+                            color: Colors.blue.withOpacity(0.7),
+                          ),
+                          const SizedBox(width: 6),
+                          Expanded(
+                            child: GestureDetector(
+                              onTap: () => _openLink(context, problemLink),
+                              child: Text(
+                                problemLink,
+                                style: TextStyle(
+                                  color: Colors.blue.withOpacity(0.7),
+                                  fontSize: 13,
+                                  decoration: TextDecoration.underline,
+                                ),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 4),
+                          IconButton(
+                            icon: Icon(
+                              Icons.copy,
+                              size: 16,
+                              color: Colors.white.withOpacity(0.5),
+                            ),
+                            onPressed: () => _copyLink(context, problemLink),
+                            tooltip: 'Copy Link',
+                            padding: EdgeInsets.zero,
+                            constraints: const BoxConstraints(),
+                            visualDensity: VisualDensity.compact,
+                          ),
+                        ],
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+              Row(
+                children: [
+                  IconButton(
+                    icon: Icon(
+                      Icons.check_circle_outline,
+                      color: Colors.green.withOpacity(0.7),
+                      size: 20,
+                    ),
+                    onPressed: () async {
+                      // Navigate to add problem screen with pre-filled data
+                      final result = await Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (context) => AddProblemScreen(
+                            categoryIcon: categoryIcon,
+                            categoryName: categoryName,
+                            prefillProblemId: problemId ?? '',
+                            prefillProblemLink: problemLink ?? '',
+                          ),
+                        ),
+                      );
+
+                      // If problem was saved, delete from do later
+                      if (result == true) {
+                        await DatabaseHelper.instance.deleteDoLater(doLater['id']);
+                        onDelete();
+                      }
+                    },
+                    tooltip: 'Mark as Solved',
+                  ),
+                  IconButton(
+                    icon: Icon(
+                      Icons.delete_outline,
+                      color: Colors.redAccent.withOpacity(0.7),
+                      size: 20,
+                    ),
+                    onPressed: () {
+                      showDialog(
+                        context: context,
+                        builder: (context) => AlertDialog(
+                          backgroundColor: const Color(0xFF1A1A1A),
+                          title: const Text(
+                            'Delete Problem',
+                            style: TextStyle(color: Colors.white),
+                          ),
+                          content: const Text(
+                            'Are you sure you want to remove this from Do Later without solving it?',
+                            style: TextStyle(color: Colors.white70),
+                          ),
+                          actions: [
+                            TextButton(
+                              onPressed: () => Navigator.pop(context),
+                              child: const Text('Cancel'),
+                            ),
+                            TextButton(
+                              onPressed: () async {
+                                Navigator.pop(context);
+                                await DatabaseHelper.instance.deleteDoLater(doLater['id']);
+                                onDelete();
+                              },
+                              child: const Text(
+                                'Delete',
+                                style: TextStyle(color: Colors.redAccent),
+                              ),
+                            ),
+                          ],
+                        ),
+                      );
+                    },
+                    tooltip: 'Delete',
+                  ),
+                ],
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: Colors.white.withOpacity(0.05),
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: Colors.white.withOpacity(0.08)),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Reason:',
+                  style: TextStyle(
+                    color: Colors.white.withOpacity(0.5),
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  reason,
+                  style: TextStyle(
+                    color: Colors.white.withOpacity(0.85),
+                    fontSize: 14,
+                    height: 1.4,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
   }
 }

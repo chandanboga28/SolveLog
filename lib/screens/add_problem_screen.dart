@@ -11,11 +11,15 @@ import '../database/database_helper.dart';
 class AddProblemScreen extends StatefulWidget {
   final String categoryIcon;
   final String categoryName;
+  final String? prefillProblemId;
+  final String? prefillProblemLink;
 
   const AddProblemScreen({
     Key? key,
     required this.categoryIcon,
     required this.categoryName,
+    this.prefillProblemId,
+    this.prefillProblemLink,
   }) : super(key: key);
 
   @override
@@ -45,6 +49,18 @@ class _AddProblemScreenState extends State<AddProblemScreen> {
   ];
 
   bool _isSubmitting = false;
+
+  @override
+  void initState() {
+    super.initState();
+    // Prefill controllers if data is provided
+    if (widget.prefillProblemId != null && widget.prefillProblemId!.isNotEmpty) {
+      _idController.text = widget.prefillProblemId!;
+    }
+    if (widget.prefillProblemLink != null && widget.prefillProblemLink!.isNotEmpty) {
+      _linkController.text = widget.prefillProblemLink!;
+    }
+  }
 
   @override
   void dispose() {
@@ -206,9 +222,9 @@ class _AddProblemScreenState extends State<AddProblemScreen> {
       const TextStyle(color: Colors.white, fontSize: 14);
 
   TextStyle get _codeTextStyle => const TextStyle(
+        fontFamily: 'JetBrainsMono',
         color: Colors.white,
         fontSize: 13,
-        fontFamily: 'monospace',
         height: 1.5,
       );
 

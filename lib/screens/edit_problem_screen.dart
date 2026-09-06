@@ -254,9 +254,9 @@ class _EditProblemScreenState extends State<EditProblemScreen> {
       const TextStyle(color: Colors.white, fontSize: 14);
 
   TextStyle get _codeTextStyle => const TextStyle(
+        fontFamily: 'JetBrainsMono',
         color: Colors.white,
         fontSize: 13,
-        fontFamily: 'monospace',
         height: 1.5,
       );
 

@@ -365,7 +365,7 @@ class _ProblemDetailScreenState extends State<ProblemDetailScreen> {
             style: const TextStyle(
               color: Colors.white,
               fontSize: 13,
-              fontFamily: 'monospace',
+              fontFamily: 'JetBrainsMono',
               height: 1.5,
             ),
           ),
@@ -512,7 +512,7 @@ class _ProblemDetailScreenState extends State<ProblemDetailScreen> {
                       style: const TextStyle(
                         color: Colors.white,
                         fontSize: 13,
-                        fontFamily: 'monospace',
+                        fontFamily: 'JetBrainsMono',
                         height: 1.5,
                       ),
                     ),

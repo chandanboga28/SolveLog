@@ -1,12 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
+import '../models/category.dart';
+import '../theme/app_theme.dart';
 
-/// Screen for adding a new custom category.
-///
-/// Allows users to create custom categories with emoji icons and names.
-/// Categories are saved to SharedPreferences and displayed alongside
-/// the default categories (Codeforces, LeetCode, AtCoder).
+/// Screen for adding a new category by selecting from predefined platforms
+/// or creating a custom one.
 class AddCategoryScreen extends StatefulWidget {
   const AddCategoryScreen({Key? key}) : super(key: key);
 
@@ -15,126 +14,7 @@ class AddCategoryScreen extends StatefulWidget {
 }
 
 class _AddCategoryScreenState extends State<AddCategoryScreen> {
-  final GlobalKey<FormState> _formKey = GlobalKey<FormState>();
-  final TextEditingController _nameController = TextEditingController();
-  
-  String _selectedIcon = '📝';
-  bool _isSubmitting = false;
-
-  // Common emoji icons for categories
-  final List<String> _iconOptions = [
-    '📝', '💡', '🎯', '🚀', '⭐', '🔥',
-    '💻', '🧩', '🎨', '📚', '🏆', '⚡',
-    '🌟', '✨', '🎓', '🔷', '🔶', '🟢',
-    '🔵', '🟣', '🟡', '🔴', '🟠', '🟤',
-  ];
-
-  @override
-  void dispose() {
-    _nameController.dispose();
-    super.dispose();
-  }
-
-  String? _requiredValidator(String? value) {
-    if (value == null || value.trim().isEmpty) {
-      return 'Category name is required';
-    }
-    if (value.trim().length < 2) {
-      return 'Name must be at least 2 characters';
-    }
-    return null;
-  }
-
-  Future<void> _handleSave() async {
-    if (!_formKey.currentState!.validate()) {
-      return;
-    }
-
-    setState(() => _isSubmitting = true);
-
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      
-      // Get existing custom categories
-      final categoriesJson = prefs.getString('custom_categories') ?? '[]';
-      final List<dynamic> categories = json.decode(categoriesJson);
-      
-      // Check for duplicate name
-      final categoryName = _nameController.text.trim();
-      final isDuplicate = categories.any(
-        (cat) => cat['name'].toString().toLowerCase() == categoryName.toLowerCase()
-      );
-      
-      // Also check against default categories
-      final defaultCategories = ['Codeforces', 'LeetCode', 'AtCoder'];
-      final isDuplicateDefault = defaultCategories.any(
-        (name) => name.toLowerCase() == categoryName.toLowerCase()
-      );
-      
-      if (isDuplicate || isDuplicateDefault) {
-        if (!mounted) return;
-        setState(() => _isSubmitting = false);
-        
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: const Text('Category with this name already exists'),
-            backgroundColor: Colors.orange.withOpacity(0.9),
-            behavior: SnackBarBehavior.floating,
-            margin: const EdgeInsets.all(16),
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-          ),
-        );
-        return;
-      }
-      
-      // Add new category
-      categories.add({
-        'icon': _selectedIcon,
-        'name': categoryName,
-      });
-      
-      // Save back to SharedPreferences
-      await prefs.setString('custom_categories', json.encode(categories));
-      
-      if (!mounted) return;
-
-      // Show success message
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: const Text('Category added successfully!'),
-          duration: const Duration(seconds: 2),
-          backgroundColor: Colors.green.withOpacity(0.9),
-          behavior: SnackBarBehavior.floating,
-          margin: const EdgeInsets.all(16),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-        ),
-      );
-
-      await Future.delayed(const Duration(milliseconds: 500));
-      if (!mounted) return;
-
-      Navigator.of(context).pop(true); // Return true to trigger reload
-    } catch (e) {
-      if (!mounted) return;
-
-      setState(() => _isSubmitting = false);
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Failed to add category: ${e.toString()}'),
-          duration: const Duration(seconds: 3),
-          backgroundColor: Colors.redAccent.withOpacity(0.9),
-          behavior: SnackBarBehavior.floating,
-          margin: const EdgeInsets.all(16),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-        ),
-      );
-    }
-  }
-
-  void _handleCancel() {
-    Navigator.of(context).pop();
-  }
+  bool _isLoading = false;
 
   @override
   Widget build(BuildContext context) {
@@ -143,24 +23,19 @@ class _AddCategoryScreenState extends State<AddCategoryScreen> {
         child: Center(
           child: SingleChildScrollView(
             child: Container(
-              constraints: const BoxConstraints(maxWidth: 600),
-              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 32),
-              child: Form(
-                key: _formKey,
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    _buildTopBar(),
-                    const SizedBox(height: 48),
-                    _buildIconSelector(),
-                    const SizedBox(height: 32),
-                    _buildNameField(),
-                    const SizedBox(height: 48),
-                    _buildPreview(),
-                    const SizedBox(height: 48),
-                    _buildActionButtons(),
-                  ],
-                ),
+              constraints: const BoxConstraints(maxWidth: 900),
+              padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 48),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _buildTopBar(),
+                  const SizedBox(height: 48),
+                  _buildSectionHeader('Popular Platforms'),
+                  const SizedBox(height: 24),
+                  _buildPlatformGrid(),
+                  const SizedBox(height: 40),
+                  _buildCustomOption(),
+                ],
               ),
             ),
           ),
@@ -173,244 +48,422 @@ class _AddCategoryScreenState extends State<AddCategoryScreen> {
     return Row(
       children: [
         IconButton(
-          icon: const Icon(Icons.arrow_back, color: Colors.white),
-          onPressed: _isSubmitting ? null : _handleCancel,
+          icon: Icon(Icons.arrow_back, color: AppTheme.textPrimary),
+          onPressed: _isLoading ? null : () => Navigator.of(context).pop(),
           tooltip: 'Back',
         ),
         const SizedBox(width: 8),
-        const Text(
+        Text(
           'Add Category',
           style: TextStyle(
-            color: Colors.white,
-            fontSize: 24,
+            color: AppTheme.textPrimary,
+            fontSize: 28,
             fontWeight: FontWeight.w700,
-            letterSpacing: -0.5,
+            letterSpacing: -0.8,
           ),
         ),
       ],
     );
   }
 
-  Widget _buildIconSelector() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          'Choose an Icon',
+  Widget _buildSectionHeader(String title) {
+    return Text(
+      title,
+      style: const TextStyle(
+        color: AppTheme.textPrimary,
+        fontSize: 18,
+        fontWeight: FontWeight.w600,
+        letterSpacing: -0.3,
+      ),
+    );
+  }
+
+  Widget _buildPlatformGrid() {
+    return Wrap(
+      spacing: 16,
+      runSpacing: 16,
+      children: PredefinedPlatforms.platforms.map((platform) {
+        return _PlatformCard(
+          platform: platform,
+          onTap: () => _handlePlatformSelection(platform),
+        );
+      }).toList(),
+    );
+  }
+
+  Widget _buildCustomOption() {
+    return _CustomPlatformCard(
+      onTap: () => _showCustomPlatformDialog(),
+    );
+  }
+
+  Future<void> _handlePlatformSelection(Category platform) async {
+    setState(() => _isLoading = true);
+
+    try {
+      final prefs = await SharedPreferences.getInstance();
+
+      // Check if platform already exists
+      if (await _categoryExists(platform.name, prefs)) {
+        if (!mounted) return;
+        setState(() => _isLoading = false);
+        _showError('${platform.name} is already added');
+        return;
+      }
+
+      // Add to custom categories with full metadata
+      final categoriesJson = prefs.getString('custom_categories') ?? '[]';
+      final List<dynamic> categories = json.decode(categoriesJson);
+
+      categories.add(platform.toJson());
+
+      await prefs.setString('custom_categories', json.encode(categories));
+
+      if (!mounted) return;
+
+      _showSuccess('${platform.name} added successfully!');
+      await Future.delayed(const Duration(milliseconds: 500));
+      if (!mounted) return;
+      Navigator.of(context).pop(true);
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _isLoading = false);
+      _showError('Failed to add category: ${e.toString()}');
+    }
+  }
+
+  Future<void> _showCustomPlatformDialog() async {
+    final nameController = TextEditingController();
+
+    final result = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: AppTheme.surface,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text(
+          'Custom Platform',
           style: TextStyle(
-            color: Colors.white.withOpacity(0.85),
-            fontSize: 14,
-            fontWeight: FontWeight.w600,
+            color: AppTheme.textPrimary,
+            fontWeight: FontWeight.w700,
           ),
         ),
-        const SizedBox(height: 16),
-        Container(
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            color: const Color(0xFF1A1A1A),
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: Colors.white.withOpacity(0.1)),
-          ),
-          child: Wrap(
-            spacing: 12,
-            runSpacing: 12,
-            children: _iconOptions.map((icon) {
-              final isSelected = icon == _selectedIcon;
-              return GestureDetector(
-                onTap: () => setState(() => _selectedIcon = icon),
-                child: AnimatedContainer(
-                  duration: const Duration(milliseconds: 200),
-                  width: 56,
-                  height: 56,
-                  decoration: BoxDecoration(
-                    color: isSelected
-                        ? Colors.white.withOpacity(0.15)
-                        : Colors.white.withOpacity(0.05),
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(
-                      color: isSelected
-                          ? Colors.white.withOpacity(0.4)
-                          : Colors.white.withOpacity(0.1),
-                      width: isSelected ? 2 : 1,
-                    ),
-                  ),
-                  child: Center(
-                    child: Text(
-                      icon,
-                      style: const TextStyle(fontSize: 28),
-                    ),
-                  ),
-                ),
-              );
-            }).toList(),
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildNameField() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          'Category Name',
-          style: TextStyle(
-            color: Colors.white.withOpacity(0.85),
-            fontSize: 14,
-            fontWeight: FontWeight.w600,
-          ),
-        ),
-        const SizedBox(height: 12),
-        TextFormField(
-          controller: _nameController,
-          style: const TextStyle(color: Colors.white, fontSize: 16),
-          decoration: InputDecoration(
-            hintText: 'e.g. HackerRank, CodeChef, Personal',
-            hintStyle: TextStyle(color: Colors.white.withOpacity(0.3)),
-            filled: true,
-            fillColor: const Color(0xFF1A1A1A),
-            contentPadding:
-                const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
-            border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-              borderSide: BorderSide(color: Colors.white.withOpacity(0.1)),
-            ),
-            enabledBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-              borderSide: BorderSide(color: Colors.white.withOpacity(0.1)),
-            ),
-            focusedBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-              borderSide: BorderSide(color: Colors.white.withOpacity(0.35)),
-            ),
-            errorBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-              borderSide: BorderSide(color: Colors.redAccent.withOpacity(0.6)),
-            ),
-            focusedErrorBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-              borderSide: BorderSide(color: Colors.redAccent.withOpacity(0.8)),
-            ),
-            errorStyle: TextStyle(
-              color: Colors.redAccent.withOpacity(0.9),
-              fontSize: 12,
-            ),
-          ),
-          validator: _requiredValidator,
-          onChanged: (value) => setState(() {}), // Update preview
-        ),
-      ],
-    );
-  }
-
-  Widget _buildPreview() {
-    final previewName = _nameController.text.trim().isEmpty
-        ? 'Category Name'
-        : _nameController.text.trim();
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          'Preview',
-          style: TextStyle(
-            color: Colors.white.withOpacity(0.85),
-            fontSize: 14,
-            fontWeight: FontWeight.w600,
-          ),
-        ),
-        const SizedBox(height: 12),
-        Center(
-          child: Container(
-            width: 180,
-            height: 140,
-            decoration: BoxDecoration(
-              color: const Color(0xFF1A1A1A),
-              border: Border.all(
-                color: Colors.white.withOpacity(0.2),
-                width: 1.5,
-              ),
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Text(
-                  _selectedIcon,
-                  style: const TextStyle(fontSize: 40),
-                ),
-                const SizedBox(height: 12),
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 8),
-                  child: Text(
-                    previewName,
-                    textAlign: TextAlign.center,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      fontSize: 15,
-                      fontWeight: FontWeight.w600,
-                      color: Colors.white,
-                      letterSpacing: -0.3,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildActionButtons() {
-    return Row(
-      children: [
-        Expanded(
-          child: OutlinedButton(
-            onPressed: _isSubmitting ? null : _handleCancel,
-            style: OutlinedButton.styleFrom(
-              foregroundColor: Colors.white70,
-              side: BorderSide(color: Colors.white.withOpacity(0.15)),
-              padding: const EdgeInsets.symmetric(vertical: 16),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(10),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Enter the platform name',
+              style: TextStyle(
+                color: AppTheme.textSecondary,
+                fontSize: 14,
               ),
             ),
+            const SizedBox(height: 16),
+            TextField(
+              controller: nameController,
+              autofocus: true,
+              style: const TextStyle(color: AppTheme.textPrimary),
+              decoration: InputDecoration(
+                hintText: 'e.g., Project Euler',
+                hintStyle: const TextStyle(color: AppTheme.textTertiary),
+                filled: true,
+                fillColor: AppTheme.background,
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(10),
+                  borderSide: const BorderSide(color: AppTheme.border),
+                ),
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(10),
+                  borderSide: const BorderSide(color: AppTheme.border),
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(10),
+                  borderSide: const BorderSide(color: AppTheme.borderFocus, width: 1.5),
+                ),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
             child: const Text('Cancel'),
           ),
-        ),
-        const SizedBox(width: 16),
-        Expanded(
-          child: ElevatedButton(
-            onPressed: _isSubmitting ? null : _handleSave,
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.white.withOpacity(0.12),
-              foregroundColor: Colors.white,
-              elevation: 0,
-              padding: const EdgeInsets.symmetric(vertical: 16),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(10),
-                side: BorderSide(color: Colors.white.withOpacity(0.2)),
-              ),
+          TextButton(
+            onPressed: () {
+              if (nameController.text.trim().isNotEmpty) {
+                Navigator.pop(context, true);
+              }
+            },
+            child: const Text(
+              'Add',
+              style: TextStyle(fontWeight: FontWeight.w600),
             ),
-            child: _isSubmitting
-                ? const SizedBox(
-                    width: 18,
-                    height: 18,
-                    child: CircularProgressIndicator(
-                      strokeWidth: 2,
-                      color: Colors.white70,
+          ),
+        ],
+      ),
+    );
+
+    if (result == true && nameController.text.trim().isNotEmpty) {
+      await _handleCustomPlatform(nameController.text.trim());
+    }
+  }
+
+  Future<void> _handleCustomPlatform(String name) async {
+    setState(() => _isLoading = true);
+
+    try {
+      final prefs = await SharedPreferences.getInstance();
+
+      // Check if platform already exists
+      if (await _categoryExists(name, prefs)) {
+        if (!mounted) return;
+        setState(() => _isLoading = false);
+        _showError('$name is already added');
+        return;
+      }
+
+      // Create custom category
+      final customCategory = Category(
+        id: Category.generateId(name),
+        name: name,
+        icon: 'folder_outlined',
+        type: CategoryType.custom,
+        integrationType: IntegrationType.none,
+      );
+
+      // Add to custom categories
+      final categoriesJson = prefs.getString('custom_categories') ?? '[]';
+      final List<dynamic> categories = json.decode(categoriesJson);
+
+      categories.add(customCategory.toJson());
+
+      await prefs.setString('custom_categories', json.encode(categories));
+
+      if (!mounted) return;
+
+      _showSuccess('$name added successfully!');
+      await Future.delayed(const Duration(milliseconds: 500));
+      if (!mounted) return;
+      Navigator.of(context).pop(true);
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _isLoading = false);
+      _showError('Failed to add category: ${e.toString()}');
+    }
+  }
+
+  Future<bool> _categoryExists(String name, SharedPreferences prefs) async {
+    // Check default categories
+    final defaultCategoriesJson = prefs.getString('default_categories') ?? '[]';
+    final List<dynamic> defaultCategories = json.decode(defaultCategoriesJson);
+
+    final existsInDefault = defaultCategories.any(
+      (cat) => cat['name'].toString().toLowerCase() == name.toLowerCase(),
+    );
+
+    if (existsInDefault) return true;
+
+    // Check custom categories
+    final customCategoriesJson = prefs.getString('custom_categories') ?? '[]';
+    final List<dynamic> customCategories = json.decode(customCategoriesJson);
+
+    final existsInCustom = customCategories.any(
+      (cat) => cat['name'].toString().toLowerCase() == name.toLowerCase(),
+    );
+
+    return existsInCustom;
+  }
+
+  void _showSuccess(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        backgroundColor: AppTheme.success,
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
+  }
+
+  void _showError(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        backgroundColor: AppTheme.error,
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
+  }
+}
+
+class _PlatformCard extends StatefulWidget {
+  final Category platform;
+  final VoidCallback onTap;
+
+  const _PlatformCard({
+    required this.platform,
+    required this.onTap,
+  });
+
+  @override
+  State<_PlatformCard> createState() => _PlatformCardState();
+}
+
+class _PlatformCardState extends State<_PlatformCard> {
+  bool _isHovered = false;
+
+  IconData get _iconData {
+    switch (widget.platform.icon) {
+      case 'code':
+        return Icons.code;
+      case 'bolt':
+        return Icons.bolt;
+      case 'radio_button_checked':
+        return Icons.radio_button_checked;
+      case 'restaurant':
+        return Icons.restaurant;
+      case 'military_tech':
+        return Icons.military_tech;
+      case 'hub':
+        return Icons.hub;
+      case 'public':
+        return Icons.public;
+      case 'school':
+        return Icons.school;
+      default:
+        return Icons.folder_outlined;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return MouseRegion(
+      onEnter: (_) => setState(() => _isHovered = true),
+      onExit: (_) => setState(() => _isHovered = false),
+      child: GestureDetector(
+        onTap: widget.onTap,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 200),
+          width: 200,
+          padding: const EdgeInsets.all(20),
+          decoration: BoxDecoration(
+            color: AppTheme.surface,
+            border: Border.all(
+              color: _isHovered ? AppTheme.primary.withOpacity(0.6) : AppTheme.border,
+              width: 1,
+            ),
+            borderRadius: BorderRadius.circular(12),
+            boxShadow: _isHovered
+                ? [
+                    BoxShadow(
+                      color: AppTheme.primary.withOpacity(0.12),
+                      blurRadius: 20,
+                      spreadRadius: 0,
                     ),
-                  )
-                : const Text(
-                    'Add Category',
-                    style: TextStyle(fontWeight: FontWeight.w600),
-                  ),
+                  ]
+                : [],
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 48,
+                height: 48,
+                decoration: BoxDecoration(
+                  color: AppTheme.primary.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Icon(
+                  _iconData,
+                  color: AppTheme.primary,
+                  size: 24,
+                ),
+              ),
+              const SizedBox(height: 12),
+              Text(
+                widget.platform.name,
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w600,
+                  color: AppTheme.textPrimary,
+                  letterSpacing: -0.2,
+                ),
+              ),
+            ],
           ),
         ),
-      ],
+      ),
+    );
+  }
+}
+
+class _CustomPlatformCard extends StatefulWidget {
+  final VoidCallback onTap;
+
+  const _CustomPlatformCard({required this.onTap});
+
+  @override
+  State<_CustomPlatformCard> createState() => _CustomPlatformCardState();
+}
+
+class _CustomPlatformCardState extends State<_CustomPlatformCard> {
+  bool _isHovered = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return MouseRegion(
+      onEnter: (_) => setState(() => _isHovered = true),
+      onExit: (_) => setState(() => _isHovered = false),
+      child: GestureDetector(
+        onTap: widget.onTap,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 200),
+          width: 200,
+          padding: const EdgeInsets.all(20),
+          decoration: BoxDecoration(
+            color: AppTheme.surface,
+            border: Border.all(
+              color: _isHovered ? AppTheme.primary.withOpacity(0.5) : AppTheme.border,
+              width: 1,
+              style: BorderStyle.solid,
+            ),
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 48,
+                height: 48,
+                decoration: BoxDecoration(
+                  border: Border.all(
+                    color: _isHovered ? AppTheme.primary : AppTheme.textTertiary,
+                    width: 1.5,
+                  ),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Icon(
+                  Icons.add,
+                  color: _isHovered ? AppTheme.primary : AppTheme.textSecondary,
+                  size: 24,
+                ),
+              ),
+              const SizedBox(height: 12),
+              Text(
+                'Custom Platform',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w600,
+                  color: _isHovered ? AppTheme.primary : AppTheme.textPrimary,
+                  letterSpacing: -0.2,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }

@@ -125,6 +125,17 @@ class _CategoryProblemsScreenState extends State<CategoryProblemsScreen> {
   void _applyFiltersAndSort() {
     List<Problem> filtered = List.from(_problems);
 
+    // Apply search filter
+    final searchQuery = _searchController.text.toLowerCase().trim();
+    if (searchQuery.isNotEmpty) {
+      filtered = filtered.where((problem) {
+        return problem.problemId.toLowerCase().contains(searchQuery) ||
+               problem.problemName.toLowerCase().contains(searchQuery) ||
+               problem.rating.toLowerCase().contains(searchQuery) ||
+               problem.category.toLowerCase().contains(searchQuery);
+      }).toList();
+    }
+
     // Apply date filter (independent)
     if (_dateRange != null) {
       filtered = filtered.where((problem) {
@@ -426,12 +437,27 @@ class _CategoryProblemsScreenState extends State<CategoryProblemsScreen> {
       ),
       child: TextField(
         controller: _searchController,
+        onChanged: (value) {
+          _applyFiltersAndSort();
+        },
         style: const TextStyle(color: Colors.white, fontSize: 14),
         decoration: InputDecoration(
           hintText: 'Search problems...',
           hintStyle: TextStyle(color: Colors.white.withOpacity(0.35)),
           prefixIcon: Icon(Icons.search,
               color: Colors.white.withOpacity(0.35), size: 20),
+          suffixIcon: _searchController.text.isNotEmpty
+              ? IconButton(
+                  icon: Icon(Icons.clear,
+                      color: Colors.white.withOpacity(0.5), size: 20),
+                  onPressed: () {
+                    setState(() {
+                      _searchController.clear();
+                    });
+                    _applyFiltersAndSort();
+                  },
+                )
+              : null,
           border: InputBorder.none,
           contentPadding:
               const EdgeInsets.symmetric(horizontal: 16, vertical: 14),

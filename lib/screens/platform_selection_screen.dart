@@ -3,6 +3,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
 import '../theme/app_theme.dart';
 import '../database/database_helper.dart';
+import '../services/auth_service.dart';
 import 'category_problems_screen.dart';
 import 'add_category_screen.dart';
 import 'edit_category_screen.dart';
@@ -16,6 +17,7 @@ class PlatformSelectionScreen extends StatefulWidget {
 }
 
 class _PlatformSelectionScreenState extends State<PlatformSelectionScreen> {
+  final AuthService _authService = AuthService();
   List<Map<String, String>> _defaultCategories = [];
   List<Map<String, String>> _customCategories = [];
   Map<String, int> _problemCounts = {};
@@ -320,10 +322,58 @@ class _PlatformSelectionScreenState extends State<PlatformSelectionScreen> {
     }
   }
 
+  Future<void> _handleLogout() async {
+    // Show confirmation dialog
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: AppTheme.surface,
+        title: const Text(
+          'Sign Out',
+          style: TextStyle(color: AppTheme.textPrimary),
+        ),
+        content: const Text(
+          'Are you sure you want to sign out?',
+          style: TextStyle(color: AppTheme.textSecondary),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: TextButton.styleFrom(
+              foregroundColor: AppTheme.error,
+            ),
+            child: const Text('Sign Out'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true && mounted) {
+      try {
+        await _authService.signOut();
+        // Navigation handled by AuthGate in main.dart
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Error signing out: ${e.toString()}'),
+              backgroundColor: AppTheme.error,
+            ),
+          );
+        }
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     if (_isLoading) {
       return const Scaffold(
+        backgroundColor: AppTheme.background,
         body: Center(
           child: CircularProgressIndicator(color: AppTheme.primary),
         ),
@@ -331,18 +381,20 @@ class _PlatformSelectionScreenState extends State<PlatformSelectionScreen> {
     }
 
     return Scaffold(
-      body: Container(
-        decoration: BoxDecoration(
-          gradient: AppTheme.subtleGlow,
-        ),
-        child: Center(
-          child: SingleChildScrollView(
-            child: Container(
-              constraints: const BoxConstraints(maxWidth: 1200),
-              padding: const EdgeInsets.symmetric(horizontal: 48, vertical: 48),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.center,
-                children: [
+      body: Stack(
+        children: [
+          Container(
+            decoration: BoxDecoration(
+              gradient: AppTheme.subtleGlow,
+            ),
+            child: Center(
+              child: SingleChildScrollView(
+                child: Container(
+                  constraints: const BoxConstraints(maxWidth: 1200),
+                  padding: const EdgeInsets.symmetric(horizontal: 48, vertical: 48),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.center,
+                    children: [
                   // Logo
                   Container(
                     width: 96,
@@ -517,12 +569,20 @@ class _PlatformSelectionScreenState extends State<PlatformSelectionScreen> {
                     ),
                   ),
                 ],
-              ),
-            ),
-          ),
-        ),
+              ), // Close Column
+            ), // Close inner Container
+          ), // Close SingleChildScrollView
+        ), // Close Center
+      ), // Close outer Container
+      // Logout button in top-right corner
+      Positioned(
+        top: 24,
+        right: 24,
+        child: _LogoutButton(onLogout: _handleLogout),
       ),
-    );
+    ], // Close Stack children
+    ), // Close Scaffold body: Stack
+  ); // Close Scaffold
   }
 }
 
@@ -728,6 +788,102 @@ class _AddCategoryCardState extends State<_AddCategoryCard> {
                 overflow: TextOverflow.ellipsis,
               ),
             ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Logout button widget for platform selection screen
+class _LogoutButton extends StatefulWidget {
+  final VoidCallback onLogout;
+
+  const _LogoutButton({required this.onLogout});
+
+  @override
+  State<_LogoutButton> createState() => _LogoutButtonState();
+}
+
+class _LogoutButtonState extends State<_LogoutButton> {
+  bool _isHovered = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final authService = AuthService();
+    final userEmail = authService.userEmail;
+
+    return MouseRegion(
+      onEnter: (_) => setState(() => _isHovered = true),
+      onExit: (_) => setState(() => _isHovered = false),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        decoration: BoxDecoration(
+          color: _isHovered
+              ? AppTheme.surface
+              : AppTheme.surface.withOpacity(0.9),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: _isHovered
+                ? AppTheme.border
+                : AppTheme.border.withOpacity(0.5),
+          ),
+          boxShadow: _isHovered
+              ? [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.05),
+                    blurRadius: 8,
+                    offset: const Offset(0, 2),
+                  ),
+                ]
+              : [],
+        ),
+        child: Material(
+          color: Colors.transparent,
+          child: InkWell(
+            onTap: widget.onLogout,
+            borderRadius: BorderRadius.circular(12),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (userEmail != null) ...[
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.end,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Text(
+                          'Signed in as',
+                          style: TextStyle(
+                            color: AppTheme.textTertiary,
+                            fontSize: 11,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          userEmail.length > 25
+                              ? '${userEmail.substring(0, 25)}...'
+                              : userEmail,
+                          style: const TextStyle(
+                            color: AppTheme.textSecondary,
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(width: 12),
+                  ],
+                  Icon(
+                    Icons.logout,
+                    size: 20,
+                    color: AppTheme.textSecondary,
+                  ),
+                ],
+              ),
+            ),
           ),
         ),
       ),

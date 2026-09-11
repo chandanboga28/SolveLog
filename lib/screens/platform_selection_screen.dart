@@ -1,9 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import 'dart:convert';
 import '../theme/app_theme.dart';
 import '../database/database_helper.dart';
 import '../services/auth_service.dart';
+import '../services/category_repository.dart';
+import '../services/category_sync_service.dart';
 import 'category_problems_screen.dart';
 import 'add_category_screen.dart';
 import 'edit_category_screen.dart';
@@ -18,23 +21,67 @@ class PlatformSelectionScreen extends StatefulWidget {
 
 class _PlatformSelectionScreenState extends State<PlatformSelectionScreen> {
   final AuthService _authService = AuthService();
+  late final CategorySyncService _categorySyncService;
   List<Map<String, String>> _defaultCategories = [];
   List<Map<String, String>> _customCategories = [];
   Map<String, int> _problemCounts = {};
   bool _isLoading = true;
 
+  /// Get user-specific storage key
+  /// 
+  /// Categories are namespaced by user ID to prevent cross-user data leakage
+  String _getUserKey(String baseKey) {
+    final userId = _authService.currentUser?.id;
+    if (userId == null) {
+      // Fallback for logged-out state - use global keys
+      return baseKey;
+    }
+    return '${baseKey}_$userId';
+  }
+
   @override
   void initState() {
     super.initState();
+    // Initialize category sync service
+    final repository = CategoryRepository(Supabase.instance.client);
+    _categorySyncService = CategorySyncService(repository, _authService);
     _loadCategories();
   }
 
   Future<void> _loadCategories() async {
+    setState(() => _isLoading = true);
+    
     try {
-      final prefs = await SharedPreferences.getInstance();
+      // Sync with Supabase on load if authenticated
+      if (_authService.isAuthenticated) {
+        try {
+          // Fetch categories from cloud (source of truth)
+          final cloudCategories = await _categorySyncService.syncOnLogin();
+          
+          // Convert cloud categories to display format
+          _customCategories = cloudCategories
+              .map((cat) => {
+                    'icon': cat.icon,
+                    'name': cat.name,
+                  })
+              .toList();
+          
+          print('Loaded ${cloudCategories.length} categories from Supabase for authenticated user');
+        } catch (e) {
+          print('Error syncing categories: $e');
+          // On error, clear categories to avoid showing stale data
+          _customCategories = [];
+        }
+      } else {
+        // Not authenticated - clear categories
+        _customCategories = [];
+      }
       
-      // Load default categories
-      final defaultCategoriesJson = prefs.getString('default_categories');
+      // Load default categories (always shown)
+      final prefs = await SharedPreferences.getInstance();
+      final defaultKey = _getUserKey('default_categories');
+      
+      final defaultCategoriesJson = prefs.getString(defaultKey);
       if (defaultCategoriesJson != null) {
         final List<dynamic> defaults = json.decode(defaultCategoriesJson);
         _defaultCategories = defaults
@@ -53,28 +100,17 @@ class _PlatformSelectionScreenState extends State<PlatformSelectionScreen> {
             'icon': '📝',
             'name': 'Miscellaneous',
           });
-          await prefs.setString('default_categories', json.encode(_defaultCategories));
+          await prefs.setString(defaultKey, json.encode(_defaultCategories));
         }
       } else {
-        // Initialize with hardcoded defaults
+        // Initialize with hardcoded defaults for this user
         _defaultCategories = [
           {'icon': '💻', 'name': 'Codeforces'},
           {'icon': '⚡', 'name': 'LeetCode'},
           {'icon': '📝', 'name': 'Miscellaneous'},
         ];
-        await prefs.setString('default_categories', json.encode(_defaultCategories));
+        await prefs.setString(defaultKey, json.encode(_defaultCategories));
       }
-      
-      // Load custom categories
-      final categoriesJson = prefs.getString('custom_categories') ?? '[]';
-      final List<dynamic> categories = json.decode(categoriesJson);
-
-      _customCategories = categories
-          .map((cat) => {
-                'icon': cat['icon'].toString(),
-                'name': cat['name'].toString(),
-              })
-          .toList();
       
       // Load problem counts for all categories
       await _loadProblemCounts();
@@ -85,6 +121,7 @@ class _PlatformSelectionScreenState extends State<PlatformSelectionScreen> {
         });
       }
     } catch (e) {
+      print('Error loading categories: $e');
       if (mounted) {
         setState(() => _isLoading = false);
       }
@@ -271,30 +308,43 @@ class _PlatformSelectionScreenState extends State<PlatformSelectionScreen> {
 
   Future<void> _deleteCategory(int index, String name, bool isDefault) async {
     try {
+      // Get the category ID for cloud deletion (using user-namespaced key)
       final prefs = await SharedPreferences.getInstance();
+      final storageKey = isDefault ? _getUserKey('default_categories') : _getUserKey('custom_categories');
+      final categoriesJson = prefs.getString(storageKey) ?? '[]';
+      final List<dynamic> categories = json.decode(categoriesJson);
       
-      if (isDefault) {
-        final categoriesJson = prefs.getString('default_categories') ?? '[]';
-        final List<dynamic> categories = json.decode(categoriesJson);
-        categories.removeAt(index);
-        await prefs.setString('default_categories', json.encode(categories));
-      } else {
-        final categoriesJson = prefs.getString('custom_categories') ?? '[]';
-        final List<dynamic> categories = json.decode(categoriesJson);
-        categories.removeAt(index);
-        await prefs.setString('custom_categories', json.encode(categories));
+      String? categoryId;
+      if (index >= 0 && index < categories.length) {
+        categoryId = categories[index]['id']?.toString() ?? 
+                     name.toLowerCase().replaceAll(' ', '_');
       }
+      
+      // Delete using sync service (handles both local and cloud)
+      final success = await _categorySyncService.deleteCategory(
+        categoryId ?? name,
+        index,
+        isDefault: isDefault,
+      );
       
       if (!mounted) return;
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('$name deleted successfully'),
-          backgroundColor: AppTheme.success,
-        ),
-      );
-
-      _loadCategories();
+      if (success) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('$name deleted successfully'),
+            backgroundColor: AppTheme.success,
+          ),
+        );
+        _loadCategories();
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: const Text('Failed to delete category'),
+            backgroundColor: AppTheme.error,
+          ),
+        );
+      }
     } catch (e) {
       if (!mounted) return;
 
@@ -354,7 +404,19 @@ class _PlatformSelectionScreenState extends State<PlatformSelectionScreen> {
 
     if (confirmed == true && mounted) {
       try {
+        // Clear user-specific local data before signing out
+        await _categorySyncService.clearUserData();
+        
+        // Clear in-memory state
+        setState(() {
+          _defaultCategories = [];
+          _customCategories = [];
+          _problemCounts = {};
+        });
+        
+        // Sign out from Supabase
         await _authService.signOut();
+        
         // Navigation handled by AuthGate in main.dart
       } catch (e) {
         if (mounted) {

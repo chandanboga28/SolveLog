@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
-import 'package:shared_preferences/shared_preferences.dart';
-import 'dart:convert';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import '../models/category.dart';
 import '../theme/app_theme.dart';
+import '../services/auth_service.dart';
+import '../services/category_repository.dart';
+import '../services/category_sync_service.dart';
 
 /// Screen for adding a new category by selecting from predefined platforms
 /// or creating a custom one.
@@ -15,6 +17,14 @@ class AddCategoryScreen extends StatefulWidget {
 
 class _AddCategoryScreenState extends State<AddCategoryScreen> {
   bool _isLoading = false;
+  late final CategorySyncService _categorySyncService;
+
+  @override
+  void initState() {
+    super.initState();
+    final repository = CategoryRepository(Supabase.instance.client);
+    _categorySyncService = CategorySyncService(repository, AuthService());
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -101,34 +111,32 @@ class _AddCategoryScreenState extends State<AddCategoryScreen> {
     setState(() => _isLoading = true);
 
     try {
-      final prefs = await SharedPreferences.getInstance();
-
       // Check if platform already exists
-      if (await _categoryExists(platform.name, prefs)) {
+      if (await _categorySyncService.categoryExists(platform.name)) {
         if (!mounted) return;
         setState(() => _isLoading = false);
         _showError('${platform.name} is already added');
         return;
       }
 
-      // Add to custom categories with full metadata
-      final categoriesJson = prefs.getString('custom_categories') ?? '[]';
-      final List<dynamic> categories = json.decode(categoriesJson);
-
-      categories.add(platform.toJson());
-
-      await prefs.setString('custom_categories', json.encode(categories));
+      // Add using sync service (cloud first, then local)
+      final addedCategory = await _categorySyncService.addCategory(platform);
 
       if (!mounted) return;
+      setState(() => _isLoading = false);
 
-      _showSuccess('${platform.name} added successfully!');
-      await Future.delayed(const Duration(milliseconds: 500));
-      if (!mounted) return;
-      Navigator.of(context).pop(true);
+      if (addedCategory != null) {
+        _showSuccess('${platform.name} added successfully!');
+        await Future.delayed(const Duration(milliseconds: 500));
+        if (!mounted) return;
+        Navigator.of(context).pop(true);
+      } else {
+        _showError('Failed to add ${platform.name}');
+      }
     } catch (e) {
       if (!mounted) return;
       setState(() => _isLoading = false);
-      _showError('Failed to add category: ${e.toString()}');
+      _showError(e.toString());
     }
   }
 
@@ -213,10 +221,8 @@ class _AddCategoryScreenState extends State<AddCategoryScreen> {
     setState(() => _isLoading = true);
 
     try {
-      final prefs = await SharedPreferences.getInstance();
-
       // Check if platform already exists
-      if (await _categoryExists(name, prefs)) {
+      if (await _categorySyncService.categoryExists(name)) {
         if (!mounted) return;
         setState(() => _isLoading = false);
         _showError('$name is already added');
@@ -232,47 +238,25 @@ class _AddCategoryScreenState extends State<AddCategoryScreen> {
         integrationType: IntegrationType.none,
       );
 
-      // Add to custom categories
-      final categoriesJson = prefs.getString('custom_categories') ?? '[]';
-      final List<dynamic> categories = json.decode(categoriesJson);
-
-      categories.add(customCategory.toJson());
-
-      await prefs.setString('custom_categories', json.encode(categories));
+      // Add using sync service (cloud first, then local)
+      final addedCategory = await _categorySyncService.addCategory(customCategory);
 
       if (!mounted) return;
+      setState(() => _isLoading = false);
 
-      _showSuccess('$name added successfully!');
-      await Future.delayed(const Duration(milliseconds: 500));
-      if (!mounted) return;
-      Navigator.of(context).pop(true);
+      if (addedCategory != null) {
+        _showSuccess('$name added successfully!');
+        await Future.delayed(const Duration(milliseconds: 500));
+        if (!mounted) return;
+        Navigator.of(context).pop(true);
+      } else {
+        _showError('Failed to add $name');
+      }
     } catch (e) {
       if (!mounted) return;
       setState(() => _isLoading = false);
       _showError('Failed to add category: ${e.toString()}');
     }
-  }
-
-  Future<bool> _categoryExists(String name, SharedPreferences prefs) async {
-    // Check default categories
-    final defaultCategoriesJson = prefs.getString('default_categories') ?? '[]';
-    final List<dynamic> defaultCategories = json.decode(defaultCategoriesJson);
-
-    final existsInDefault = defaultCategories.any(
-      (cat) => cat['name'].toString().toLowerCase() == name.toLowerCase(),
-    );
-
-    if (existsInDefault) return true;
-
-    // Check custom categories
-    final customCategoriesJson = prefs.getString('custom_categories') ?? '[]';
-    final List<dynamic> customCategories = json.decode(customCategoriesJson);
-
-    final existsInCustom = customCategories.any(
-      (cat) => cat['name'].toString().toLowerCase() == name.toLowerCase(),
-    );
-
-    return existsInCustom;
   }
 
   void _showSuccess(String message) {

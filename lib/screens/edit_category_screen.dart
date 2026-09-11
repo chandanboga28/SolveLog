@@ -1,11 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
+import '../services/auth_service.dart';
 
 /// Screen for editing an existing category (default or custom).
 ///
 /// Allows users to change the icon and name of a category.
-/// Updates are saved to SharedPreferences.
+/// Updates are saved to user-namespaced SharedPreferences.
 class EditCategoryScreen extends StatefulWidget {
   final String originalIcon;
   final String originalName;
@@ -26,6 +27,7 @@ class EditCategoryScreen extends StatefulWidget {
 
 class _EditCategoryScreenState extends State<EditCategoryScreen> {
   final GlobalKey<FormState> _formKey = GlobalKey<FormState>();
+  final AuthService _authService = AuthService();
   late final TextEditingController _nameController;
   
   late String _selectedIcon;
@@ -38,6 +40,15 @@ class _EditCategoryScreenState extends State<EditCategoryScreen> {
     '🌟', '✨', '🎓', '🔷', '🔶', '🟢',
     '🔵', '🟣', '🟡', '🔴', '🟠', '🟤',
   ];
+
+  /// Get user-specific storage key
+  String _getUserKey(String baseKey) {
+    final userId = _authService.currentUser?.id;
+    if (userId == null) {
+      return baseKey;
+    }
+    return '${baseKey}_$userId';
+  }
 
   @override
   void initState() {
@@ -72,8 +83,8 @@ class _EditCategoryScreenState extends State<EditCategoryScreen> {
     try {
       final prefs = await SharedPreferences.getInstance();
       
-      // Determine which category list to work with
-      final storageKey = widget.isDefault ? 'default_categories' : 'custom_categories';
+      // Determine which category list to work with (user-namespaced)
+      final storageKey = widget.isDefault ? _getUserKey('default_categories') : _getUserKey('custom_categories');
       
       // Get existing categories
       final categoriesJson = prefs.getString(storageKey) ?? '[]';
@@ -104,8 +115,8 @@ class _EditCategoryScreenState extends State<EditCategoryScreen> {
         return;
       }
       
-      // Check against the other category list
-      final otherStorageKey = widget.isDefault ? 'custom_categories' : 'default_categories';
+      // Check against the other category list (user-namespaced)
+      final otherStorageKey = widget.isDefault ? _getUserKey('custom_categories') : _getUserKey('default_categories');
       final otherCategoriesJson = prefs.getString(otherStorageKey) ?? '[]';
       final List<dynamic> otherCategories = json.decode(otherCategoriesJson);
       
